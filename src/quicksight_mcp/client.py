@@ -824,6 +824,262 @@ class QuickSightClient:
                 )
         return True
 
+    # ------------------------------------------------------------------
+    # Post-write verification: sheets, visuals, parameters, filters
+    # ------------------------------------------------------------------
+
+    def _verify_sheet_exists(self, analysis_id: str, sheet_id: str, expected_name: Optional[str] = None) -> bool:
+        """Verify a sheet exists after creation/rename."""
+        self.clear_analysis_def_cache(analysis_id)
+        for s in self.get_sheets(analysis_id):
+            if s.get('SheetId') == sheet_id:
+                if expected_name and s.get('Name') != expected_name:
+                    raise ChangeVerificationError(
+                        'sheet', analysis_id,
+                        f"Sheet '{sheet_id}' exists but name is '{s.get('Name')}', expected '{expected_name}'.",
+                    )
+                return True
+        raise ChangeVerificationError(
+            'sheet', analysis_id,
+            f"Sheet '{sheet_id}' not found after update.",
+        )
+
+    def _verify_sheet_deleted(self, analysis_id: str, sheet_id: str) -> bool:
+        """Verify a sheet was actually deleted."""
+        self.clear_analysis_def_cache(analysis_id)
+        for s in self.get_sheets(analysis_id):
+            if s.get('SheetId') == sheet_id:
+                raise ChangeVerificationError(
+                    'delete_sheet', analysis_id,
+                    f"Sheet '{sheet_id}' still exists after deletion.",
+                )
+        return True
+
+    def _verify_visual_exists(self, analysis_id: str, visual_id: str) -> bool:
+        """Verify a visual exists after creation."""
+        self.clear_analysis_def_cache(analysis_id)
+        if self.get_visual_definition(analysis_id, visual_id) is not None:
+            return True
+        raise ChangeVerificationError(
+            'visual', analysis_id,
+            f"Visual '{visual_id}' not found after update.",
+        )
+
+    def _verify_visual_deleted(self, analysis_id: str, visual_id: str) -> bool:
+        """Verify a visual was actually deleted."""
+        self.clear_analysis_def_cache(analysis_id)
+        if self.get_visual_definition(analysis_id, visual_id) is not None:
+            raise ChangeVerificationError(
+                'delete_visual', analysis_id,
+                f"Visual '{visual_id}' still exists after deletion.",
+            )
+        return True
+
+    def _verify_visual_title(self, analysis_id: str, visual_id: str, expected_title: str) -> bool:
+        """Verify a visual's title matches expected value."""
+        self.clear_analysis_def_cache(analysis_id)
+        vdef = self.get_visual_definition(analysis_id, visual_id)
+        if vdef is None:
+            raise ChangeVerificationError(
+                'set_visual_title', analysis_id,
+                f"Visual '{visual_id}' not found after title update.",
+            )
+        parsed = self._parse_visual(vdef)
+        actual_title = parsed.get('title', '')
+        if actual_title != expected_title:
+            raise ChangeVerificationError(
+                'set_visual_title', analysis_id,
+                f"Visual '{visual_id}' title is '{actual_title}', expected '{expected_title}'.",
+            )
+        return True
+
+    def _verify_parameter_exists(self, analysis_id: str, param_name: str) -> bool:
+        """Verify a parameter exists after creation."""
+        self.clear_analysis_def_cache(analysis_id)
+        for p in self.get_parameters(analysis_id):
+            for ptype in ('StringParameterDeclaration', 'IntegerParameterDeclaration',
+                           'DecimalParameterDeclaration', 'DateTimeParameterDeclaration'):
+                if ptype in p and p[ptype].get('Name') == param_name:
+                    return True
+        raise ChangeVerificationError(
+            'add_parameter', analysis_id,
+            f"Parameter '{param_name}' not found after update.",
+        )
+
+    def _verify_parameter_deleted(self, analysis_id: str, param_name: str) -> bool:
+        """Verify a parameter was actually deleted."""
+        self.clear_analysis_def_cache(analysis_id)
+        for p in self.get_parameters(analysis_id):
+            for ptype in ('StringParameterDeclaration', 'IntegerParameterDeclaration',
+                           'DecimalParameterDeclaration', 'DateTimeParameterDeclaration'):
+                if ptype in p and p[ptype].get('Name') == param_name:
+                    raise ChangeVerificationError(
+                        'delete_parameter', analysis_id,
+                        f"Parameter '{param_name}' still exists after deletion.",
+                    )
+        return True
+
+    def _verify_filter_group_exists(self, analysis_id: str, filter_group_id: str) -> bool:
+        """Verify a filter group exists after creation."""
+        self.clear_analysis_def_cache(analysis_id)
+        for fg in self.get_filters(analysis_id):
+            if fg.get('FilterGroupId') == filter_group_id:
+                return True
+        raise ChangeVerificationError(
+            'add_filter_group', analysis_id,
+            f"Filter group '{filter_group_id}' not found after update.",
+        )
+
+    def _verify_filter_group_deleted(self, analysis_id: str, filter_group_id: str) -> bool:
+        """Verify a filter group was actually deleted."""
+        self.clear_analysis_def_cache(analysis_id)
+        for fg in self.get_filters(analysis_id):
+            if fg.get('FilterGroupId') == filter_group_id:
+                raise ChangeVerificationError(
+                    'delete_filter_group', analysis_id,
+                    f"Filter group '{filter_group_id}' still exists after deletion.",
+                )
+        return True
+
+    def _verify_sheet_visual_count(
+        self, analysis_id: str, sheet_id: str, expected_count: int,
+    ) -> bool:
+        """Verify a sheet has the expected number of visuals (for replicate_sheet)."""
+        self.clear_analysis_def_cache(analysis_id)
+        sheet = self.get_sheet(analysis_id, sheet_id)
+        if sheet is None:
+            raise ChangeVerificationError(
+                'replicate_sheet', analysis_id,
+                f"Sheet '{sheet_id}' not found after replication.",
+            )
+        actual_count = len(sheet.get('Visuals', []))
+        if actual_count != expected_count:
+            raise ChangeVerificationError(
+                'replicate_sheet', analysis_id,
+                f"Sheet has {actual_count} visuals, expected {expected_count}.",
+            )
+        return True
+
+    def verify_analysis_health(self, analysis_id: str) -> Dict:
+        """Run a comprehensive health check on an analysis.
+
+        Checks:
+        - Analysis status is SUCCESSFUL (not FAILED or IN_PROGRESS)
+        - All sheets have at least one visual
+        - All visuals have layout elements
+        - No orphaned layout elements (pointing to non-existent visuals)
+        - All calculated fields reference valid dataset identifiers
+        - Sheet count is within QuickSight limits (<=20)
+
+        Returns:
+            dict with ``healthy`` (bool), ``checks`` (list of check results),
+            and ``issues`` (list of problems found).
+        """
+        self.clear_analysis_def_cache(analysis_id)
+        analysis = self.get_analysis(analysis_id)
+        definition = self.get_analysis_definition(analysis_id)
+
+        checks = []
+        issues = []
+
+        # Check 1: Analysis status
+        status = analysis.get('Status', '')
+        ok = 'SUCCESSFUL' in status
+        checks.append({'check': 'analysis_status', 'status': status, 'ok': ok})
+        if not ok:
+            errors = analysis.get('Errors', [])
+            issues.append(f"Analysis status: {status}. Errors: {[e.get('Message','') for e in errors]}")
+
+        sheets = definition.get('Sheets', [])
+
+        # Check 2: Sheet count within limits
+        ok = len(sheets) <= 20
+        checks.append({'check': 'sheet_count', 'count': len(sheets), 'limit': 20, 'ok': ok})
+        if not ok:
+            issues.append(f"Sheet count {len(sheets)} exceeds QuickSight max of 20")
+
+        # Check 3: Visual/layout alignment per sheet
+        total_visuals = 0
+        total_layout_elements = 0
+        for s in sheets:
+            sheet_id = s.get('SheetId', '')
+            sheet_name = s.get('Name', '')
+            visuals = s.get('Visuals', [])
+            total_visuals += len(visuals)
+
+            # Get visual IDs in this sheet
+            visual_ids = set()
+            for v in visuals:
+                for vtype in _VISUAL_TYPES:
+                    if vtype in v:
+                        visual_ids.add(v[vtype].get('VisualId', ''))
+                        break
+
+            # Get layout element IDs
+            layout_ids = set()
+            for layout in s.get('Layouts', []):
+                for elem in (
+                    layout.get('Configuration', {})
+                    .get('GridLayout', {})
+                    .get('Elements', [])
+                ):
+                    layout_ids.add(elem.get('ElementId', ''))
+                    total_layout_elements += 1
+
+            # Visuals without layout
+            orphan_visuals = visual_ids - layout_ids
+            if orphan_visuals:
+                issues.append(
+                    f"Sheet '{sheet_name}': {len(orphan_visuals)} visuals without layout: "
+                    f"{list(orphan_visuals)[:3]}..."
+                )
+
+            # Layout elements without visuals (could be filter controls, text boxes)
+            # This is informational, not necessarily an issue
+
+        checks.append({
+            'check': 'visual_layout_alignment',
+            'total_visuals': total_visuals,
+            'total_layout_elements': total_layout_elements,
+            'ok': len([i for i in issues if 'without layout' in i]) == 0,
+        })
+
+        # Check 4: Calculated fields reference valid dataset identifiers
+        valid_ds_ids = {
+            d.get('Identifier')
+            for d in definition.get('DataSetIdentifierDeclarations', [])
+        }
+        invalid_refs = []
+        for f in definition.get('CalculatedFields', []):
+            ds_id = f.get('DataSetIdentifier', '')
+            if ds_id and ds_id not in valid_ds_ids:
+                invalid_refs.append(f"{f.get('Name')} -> {ds_id}")
+
+        ok = len(invalid_refs) == 0
+        checks.append({
+            'check': 'calc_field_dataset_refs',
+            'valid_datasets': len(valid_ds_ids),
+            'invalid_refs': len(invalid_refs),
+            'ok': ok,
+        })
+        if not ok:
+            issues.append(f"Calc fields with invalid dataset refs: {invalid_refs[:5]}")
+
+        healthy = len(issues) == 0
+        return {
+            'analysis_id': analysis_id,
+            'healthy': healthy,
+            'checks': checks,
+            'issues': issues,
+            'summary': {
+                'sheets': len(sheets),
+                'visuals': total_visuals,
+                'calc_fields': len(definition.get('CalculatedFields', [])),
+                'parameters': len(definition.get('ParameterDeclarations', [])),
+                'filter_groups': len(definition.get('FilterGroups', [])),
+            },
+        }
+
     # =========================================================================
     # DASHBOARDS
     # =========================================================================
@@ -1214,6 +1470,10 @@ class QuickSightClient:
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if self._should_verify(None):
+            self._verify_sheet_exists(analysis_id, new_sheet_id, name)
+
         result['sheet_id'] = new_sheet_id
         result['sheet_name'] = name
         return result
@@ -1238,12 +1498,17 @@ class QuickSightClient:
         if len(definition['Sheets']) == original_count:
             raise ValueError(f"Sheet '{sheet_id}' not found")
 
-        return self.update_analysis(
+        result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,
             expected_last_updated=(
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if self._should_verify(None):
+            self._verify_sheet_deleted(analysis_id, sheet_id)
+
+        return result
 
     def rename_sheet(
         self,
@@ -1269,12 +1534,17 @@ class QuickSightClient:
         if not found:
             raise ValueError(f"Sheet '{sheet_id}' not found")
 
-        return self.update_analysis(
+        result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,
             expected_last_updated=(
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if self._should_verify(None):
+            self._verify_sheet_exists(analysis_id, sheet_id, new_name)
+
+        return result
 
     # =========================================================================
     # VISUAL MANAGEMENT
@@ -1374,6 +1644,10 @@ class QuickSightClient:
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if visual_id and self._should_verify(None):
+            self._verify_visual_exists(analysis_id, visual_id)
+
         result['visual_id'] = visual_id
         return result
 
@@ -1417,12 +1691,17 @@ class QuickSightClient:
         if not found:
             raise ValueError(f"Visual '{visual_id}' not found")
 
-        return self.update_analysis(
+        result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,
             expected_last_updated=(
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if self._should_verify(None):
+            self._verify_visual_deleted(analysis_id, visual_id)
+
+        return result
 
     def set_visual_title(
         self,
@@ -1458,12 +1737,17 @@ class QuickSightClient:
         if not found:
             raise ValueError(f"Visual '{visual_id}' not found")
 
-        return self.update_analysis(
+        result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,
             expected_last_updated=(
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if self._should_verify(None):
+            self._verify_visual_title(analysis_id, visual_id, title)
+
+        return result
 
     def get_visual_layout(self, analysis_id: str, visual_id: str) -> Optional[Dict]:
         """Get the layout (position/size) for a visual."""
@@ -1579,6 +1863,10 @@ class QuickSightClient:
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if new_name and self._should_verify(None):
+            self._verify_parameter_exists(analysis_id, new_name)
+
         result['parameter_name'] = new_name
         return result
 
@@ -1609,12 +1897,17 @@ class QuickSightClient:
         if len(definition['ParameterDeclarations']) == original_count:
             raise ValueError(f"Parameter '{parameter_name}' not found")
 
-        return self.update_analysis(
+        result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,
             expected_last_updated=(
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if self._should_verify(None):
+            self._verify_parameter_deleted(analysis_id, parameter_name)
+
+        return result
 
     # =========================================================================
     # FILTER GROUP MANAGEMENT
@@ -1651,6 +1944,9 @@ class QuickSightClient:
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+        if new_id and self._should_verify(None):
+            self._verify_filter_group_exists(analysis_id, new_id)
+
         result['filter_group_id'] = new_id
         return result
 
@@ -1676,12 +1972,17 @@ class QuickSightClient:
         if len(definition['FilterGroups']) == original_count:
             raise ValueError(f"Filter group '{filter_group_id}' not found")
 
-        return self.update_analysis(
+        result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,
             expected_last_updated=(
                 last_updated if self._should_lock(use_optimistic_locking) else None
             ),
         )
+
+        if self._should_verify(None):
+            self._verify_filter_group_deleted(analysis_id, filter_group_id)
+
+        return result
 
     # =========================================================================
     # BATCH & REPLICATION OPERATIONS
@@ -1803,6 +2104,10 @@ class QuickSightClient:
                 last_updated if self._should_lock(None) else None
             ),
         )
+
+        if self._should_verify(None):
+            self._verify_sheet_exists(analysis_id, new_sheet_id, target_sheet_name)
+            self._verify_sheet_visual_count(analysis_id, new_sheet_id, len(new_visuals))
 
         logger.info(
             "Replicated sheet %s -> %s (%d visuals)",

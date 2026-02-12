@@ -394,3 +394,44 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
                 str(e),
             )
             return {"error": str(e)}
+
+    @mcp.tool
+    def verify_analysis_health(analysis_id: str) -> dict:
+        """Run a comprehensive health check on a QuickSight analysis.
+
+        Use this AFTER any write operation to verify the analysis is healthy.
+        This is the "reviewer" that ensures changes actually took effect and
+        nothing was silently broken.
+
+        Checks performed:
+        - Analysis status is SUCCESSFUL (not FAILED or IN_PROGRESS)
+        - Sheet count is within QuickSight limits (<=20)
+        - All visuals have corresponding layout elements
+        - All calculated fields reference valid dataset identifiers
+
+        Args:
+            analysis_id: The QuickSight analysis ID to check.
+
+        Returns a health report with pass/fail for each check and a list
+        of any issues found.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.verify_analysis_health(analysis_id)
+            get_tracker().record_call(
+                "verify_analysis_health",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return result
+        except Exception as e:
+            get_tracker().record_call(
+                "verify_analysis_health",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
