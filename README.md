@@ -299,7 +299,18 @@ ruff format src/ tests/
 
 ## Author
 
-Built by [Krishna Goje](https://github.com/krishna-goje), Senior Analytics Engineer.
+**Krishna Goje** — Staff Analytics Engineer | AI-Augmented Engineering
+
+- Portfolio: [krishna-goje.github.io](https://krishna-goje.github.io)
+- LinkedIn: [linkedin.com/in/krishnagoje](https://www.linkedin.com/in/krishnagoje)
+- GitHub: [github.com/krishna-goje](https://github.com/krishna-goje)
+- Email: krishna19.gk@gmail.com
+
+### Background
+
+14 years building data platforms at American Express, Grubhub, Booking.com, and Opendoor. Pioneered an AI-augmented engineering ecosystem connecting 15+ enterprise platforms with parallel agent orchestration and self-learning feedback loops — compressing week-long workflows into under one hour.
+
+### Why This Project
 
 This server is extracted from a 4,800+ line production library built over months of daily QuickSight work — managing datasets, analyses, dashboards, and calculated fields across multiple business-critical dashboards.
 
@@ -310,6 +321,11 @@ Every safety feature exists because of a real production incident:
 - **Destructive change protection** — because a malformed definition update deleted all sheets from a live dashboard
 
 The self-learning engine was built because the same mistakes kept happening — reserved SQL keywords, expired credentials mid-batch, forgotten SPICE refreshes after SQL updates. The server now remembers these patterns so you don't have to.
+
+### Open Source
+
+- [quicksight-mcp](https://github.com/krishna-goje/quicksight-mcp) — MCP server for AWS QuickSight management
+- [slack-data-bot](https://github.com/krishna-goje/slack-data-bot) — Autonomous data Q&A bot with Writer/Reviewer quality loop
 
 ## Contributing
 
