@@ -25,10 +25,7 @@ from quicksight_mcp.tools.learning import register_learning_tools
 logger = logging.getLogger(__name__)
 
 # Create the MCP server
-mcp = FastMCP(
-    "QuickSight MCP",
-    dependencies=["boto3", "fastmcp"],
-)
+mcp = FastMCP("QuickSight MCP")
 
 # ---------------------------------------------------------------------------
 # Lazy-initialized globals
