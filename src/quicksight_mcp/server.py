@@ -21,6 +21,10 @@ from quicksight_mcp.tools.calculated_fields import register_calculated_field_too
 from quicksight_mcp.tools.dashboards import register_dashboard_tools
 from quicksight_mcp.tools.backup import register_backup_tools
 from quicksight_mcp.tools.learning import register_learning_tools
+from quicksight_mcp.tools.sheets import register_sheet_tools
+from quicksight_mcp.tools.visuals import register_visual_tools
+from quicksight_mcp.tools.parameters import register_parameter_tools
+from quicksight_mcp.tools.filters import register_filter_tools
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +72,10 @@ register_calculated_field_tools(mcp, get_client, get_tracker)
 register_dashboard_tools(mcp, get_client, get_tracker)
 register_backup_tools(mcp, get_client, get_tracker)
 register_learning_tools(mcp, get_tracker, get_optimizer)
+register_sheet_tools(mcp, get_client, get_tracker)
+register_visual_tools(mcp, get_client, get_tracker)
+register_parameter_tools(mcp, get_client, get_tracker)
+register_filter_tools(mcp, get_client, get_tracker)
 
 
 def main():

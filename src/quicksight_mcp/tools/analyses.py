@@ -120,7 +120,7 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
             analysis = client.get_analysis(analysis_id)
 
             # Extract sheets summary
-            sheets_raw = definition.get("Definition", {}).get("Sheets", [])
+            sheets_raw = definition.get("Sheets", [])
             sheets = []
             for s in sheets_raw:
                 visuals = s.get("Visuals", [])
@@ -132,18 +132,10 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
                     }
                 )
 
-            calc_fields = definition.get("Definition", {}).get(
-                "CalculatedFields", []
-            )
-            params = definition.get("Definition", {}).get(
-                "ParameterDeclarations", []
-            )
-            filter_groups = definition.get("Definition", {}).get(
-                "FilterGroups", []
-            )
-            ds_id_decls = definition.get("Definition", {}).get(
-                "DataSetIdentifierDeclarations", []
-            )
+            calc_fields = definition.get("CalculatedFields", [])
+            params = definition.get("ParameterDeclarations", [])
+            filter_groups = definition.get("FilterGroups", [])
+            ds_id_decls = definition.get("DataSetIdentifierDeclarations", [])
 
             result = {
                 "analysis_id": analysis_id,
@@ -323,6 +315,44 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         except Exception as e:
             get_tracker().record_call(
                 "get_parameters",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def get_analysis_raw(analysis_id: str) -> dict:
+        """Get the complete raw analysis definition for inspection.
+
+        Returns the full Definition dict exactly as stored by AWS.
+        This is useful for debugging, manual inspection, or extracting
+        complex structures (visual definitions, filter groups, etc.)
+        that can be passed to other tools.
+
+        WARNING: The output can be very large for complex analyses.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            raw = client.get_analysis_raw(analysis_id)
+            get_tracker().record_call(
+                "get_analysis_raw",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "analysis_id": analysis_id,
+                "definition": raw,
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "get_analysis_raw",
                 {"analysis_id": analysis_id},
                 (time.time() - start) * 1000,
                 False,

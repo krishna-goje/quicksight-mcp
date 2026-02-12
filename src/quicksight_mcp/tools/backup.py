@@ -188,7 +188,7 @@ def register_backup_tools(
             return {
                 "status": "cloned",
                 "source_analysis_id": source_analysis_id,
-                "new_analysis_id": result.get("AnalysisId"),
+                "new_analysis_id": result.get("analysis_id"),
                 "new_name": new_name,
                 "note": (
                     "Clone created. Make changes on the clone, then "

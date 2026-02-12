@@ -592,6 +592,7 @@ class QuickSightClient:
 
             if 'SUCCESSFUL' in status:
                 logger.info("Analysis %s update completed successfully", analysis_id)
+                self.clear_analysis_def_cache(analysis_id)
                 return {
                     'status': status,
                     'analysis_id': analysis_id,
@@ -1139,3 +1140,678 @@ class QuickSightClient:
                 analysis_id,
             )
             return []
+
+    # =========================================================================
+    # RAW DEFINITION ACCESS
+    # =========================================================================
+
+    def get_analysis_raw(self, analysis_id: str) -> Dict:
+        """Return the complete raw analysis definition for inspection."""
+        return self.get_analysis_definition(analysis_id, use_cache=False)
+
+    # =========================================================================
+    # SHEET MANAGEMENT
+    # =========================================================================
+
+    def get_sheet(self, analysis_id: str, sheet_id: str) -> Optional[Dict]:
+        """Get a specific sheet by ID, or ``None``."""
+        for s in self.get_sheets(analysis_id):
+            if s.get('SheetId') == sheet_id:
+                return s
+        return None
+
+    def list_sheet_visuals(self, analysis_id: str, sheet_id: str) -> List[Dict]:
+        """Get all visuals in a specific sheet."""
+        sheet = self.get_sheet(analysis_id, sheet_id)
+        if not sheet:
+            raise ValueError(f"Sheet '{sheet_id}' not found")
+        visuals = []
+        for v in sheet.get('Visuals', []):
+            info = self._parse_visual(v)
+            info['sheet_id'] = sheet_id
+            info['sheet_name'] = sheet.get('Name', '')
+            visuals.append(info)
+        return visuals
+
+    def add_sheet(
+        self,
+        analysis_id: str,
+        name: str,
+        sheet_id: Optional[str] = None,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Add a new sheet to an analysis.
+
+        Returns:
+            dict with ``status``, ``analysis_id``, ``sheet_id``, ``sheet_name``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        new_sheet_id = sheet_id or str(uuid.uuid4())
+
+        sheets = definition.setdefault('Sheets', [])
+        if any(s.get('SheetId') == new_sheet_id for s in sheets):
+            raise ValueError(f"Sheet '{new_sheet_id}' already exists")
+
+        new_sheet = {
+            'SheetId': new_sheet_id,
+            'Name': name,
+            'ContentType': 'INTERACTIVE',
+            'Visuals': [],
+            'Layouts': [{
+                'Configuration': {
+                    'GridLayout': {
+                        'Elements': [],
+                    }
+                }
+            }],
+        }
+        sheets.append(new_sheet)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+        result['sheet_id'] = new_sheet_id
+        result['sheet_name'] = name
+        return result
+
+    def delete_sheet(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Delete a sheet from an analysis.
+
+        Raises:
+            ValueError: If the sheet is not found.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        sheets = definition.get('Sheets', [])
+        original_count = len(sheets)
+
+        definition['Sheets'] = [s for s in sheets if s.get('SheetId') != sheet_id]
+        if len(definition['Sheets']) == original_count:
+            raise ValueError(f"Sheet '{sheet_id}' not found")
+
+        return self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+
+    def rename_sheet(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        new_name: str,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Rename an existing sheet.
+
+        Raises:
+            ValueError: If the sheet is not found.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        found = False
+        for s in definition.get('Sheets', []):
+            if s.get('SheetId') == sheet_id:
+                s['Name'] = new_name
+                found = True
+                break
+
+        if not found:
+            raise ValueError(f"Sheet '{sheet_id}' not found")
+
+        return self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+
+    # =========================================================================
+    # VISUAL MANAGEMENT
+    # =========================================================================
+
+    def get_visual_definition(self, analysis_id: str, visual_id: str) -> Optional[Dict]:
+        """Get the full raw definition of a specific visual.
+
+        Returns the visual dict as stored in the analysis definition,
+        or ``None`` if not found.
+        """
+        for sheet in self.get_sheets(analysis_id):
+            for v in sheet.get('Visuals', []):
+                for vtype in _VISUAL_TYPES:
+                    if vtype in v and v[vtype].get('VisualId') == visual_id:
+                        return v
+        return None
+
+    def _find_visual_sheet(self, definition: Dict, visual_id: str) -> Optional[Dict]:
+        """Find the sheet containing a visual (returns sheet dict)."""
+        for sheet in definition.get('Sheets', []):
+            for v in sheet.get('Visuals', []):
+                for vtype in _VISUAL_TYPES:
+                    if vtype in v and v[vtype].get('VisualId') == visual_id:
+                        return sheet
+        return None
+
+    def add_visual_to_sheet(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        visual_definition: Dict,
+        layout: Optional[Dict] = None,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Add a visual to a sheet.
+
+        Args:
+            analysis_id: Analysis ID.
+            sheet_id: Target sheet ID.
+            visual_definition: Full visual definition dict (e.g., ``{"KPIVisual": {...}}``).
+            layout: Optional layout element for grid placement (``{"ElementId": ..., "ColumnIndex": ...}``).
+            backup_first: Back up before writing.
+
+        Raises:
+            ValueError: If the sheet is not found.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+
+        target_sheet = None
+        for s in definition.get('Sheets', []):
+            if s.get('SheetId') == sheet_id:
+                target_sheet = s
+                break
+
+        if target_sheet is None:
+            raise ValueError(f"Sheet '{sheet_id}' not found")
+
+        # Extract visual ID for layout
+        visual_id = None
+        for vtype in _VISUAL_TYPES:
+            if vtype in visual_definition:
+                visual_id = visual_definition[vtype].get('VisualId', '')
+                break
+
+        target_sheet.setdefault('Visuals', []).append(visual_definition)
+
+        # Add layout element if provided or auto-generate one
+        if layout or visual_id:
+            layouts = target_sheet.setdefault('Layouts', [])
+            if not layouts:
+                layouts.append({'Configuration': {'GridLayout': {'Elements': []}}})
+            elements = (
+                layouts[0]
+                .setdefault('Configuration', {})
+                .setdefault('GridLayout', {})
+                .setdefault('Elements', [])
+            )
+            if layout:
+                elements.append(layout)
+            elif visual_id:
+                # Default: full-width, 8 rows high, appended below existing
+                max_row = max((e.get('RowIndex', 0) + e.get('RowSpan', 0) for e in elements), default=0)
+                elements.append({
+                    'ElementId': visual_id,
+                    'ElementType': 'VISUAL',
+                    'ColumnIndex': 0,
+                    'ColumnSpan': 36,
+                    'RowIndex': max_row,
+                    'RowSpan': 12,
+                })
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+        result['visual_id'] = visual_id
+        return result
+
+    def delete_visual(
+        self,
+        analysis_id: str,
+        visual_id: str,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Delete a visual from an analysis.
+
+        Also removes the corresponding layout element.
+
+        Raises:
+            ValueError: If the visual is not found.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+
+        found = False
+        for sheet in definition.get('Sheets', []):
+            original_len = len(sheet.get('Visuals', []))
+            sheet['Visuals'] = [
+                v for v in sheet.get('Visuals', [])
+                if not any(
+                    vtype in v and v[vtype].get('VisualId') == visual_id
+                    for vtype in _VISUAL_TYPES
+                )
+            ]
+            if len(sheet['Visuals']) < original_len:
+                found = True
+                # Remove layout element
+                for layout in sheet.get('Layouts', []):
+                    grid = layout.get('Configuration', {}).get('GridLayout', {})
+                    grid['Elements'] = [
+                        e for e in grid.get('Elements', [])
+                        if e.get('ElementId') != visual_id
+                    ]
+                break
+
+        if not found:
+            raise ValueError(f"Visual '{visual_id}' not found")
+
+        return self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+
+    def set_visual_title(
+        self,
+        analysis_id: str,
+        visual_id: str,
+        title: str,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Set or update the title of a visual.
+
+        Raises:
+            ValueError: If the visual is not found.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+
+        found = False
+        for sheet in definition.get('Sheets', []):
+            for v in sheet.get('Visuals', []):
+                for vtype in _VISUAL_TYPES:
+                    if vtype in v and v[vtype].get('VisualId') == visual_id:
+                        v[vtype].setdefault('Title', {})['FormatText'] = {
+                            'PlainText': title,
+                        }
+                        v[vtype]['Title']['Visibility'] = 'VISIBLE'
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                break
+
+        if not found:
+            raise ValueError(f"Visual '{visual_id}' not found")
+
+        return self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+
+    def get_visual_layout(self, analysis_id: str, visual_id: str) -> Optional[Dict]:
+        """Get the layout (position/size) for a visual."""
+        definition = self.get_analysis_definition(analysis_id)
+        for sheet in definition.get('Sheets', []):
+            for layout in sheet.get('Layouts', []):
+                for elem in (
+                    layout.get('Configuration', {})
+                    .get('GridLayout', {})
+                    .get('Elements', [])
+                ):
+                    if elem.get('ElementId') == visual_id:
+                        return elem
+        return None
+
+    def set_visual_layout(
+        self,
+        analysis_id: str,
+        visual_id: str,
+        column_index: Optional[int] = None,
+        column_span: Optional[int] = None,
+        row_index: Optional[int] = None,
+        row_span: Optional[int] = None,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Set position and size for a visual in the grid layout.
+
+        Only the provided dimensions are updated; others remain unchanged.
+
+        Raises:
+            ValueError: If the visual layout element is not found.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+
+        found = False
+        for sheet in definition.get('Sheets', []):
+            for layout in sheet.get('Layouts', []):
+                for elem in (
+                    layout.get('Configuration', {})
+                    .get('GridLayout', {})
+                    .get('Elements', [])
+                ):
+                    if elem.get('ElementId') == visual_id:
+                        if column_index is not None:
+                            elem['ColumnIndex'] = column_index
+                        if column_span is not None:
+                            elem['ColumnSpan'] = column_span
+                        if row_index is not None:
+                            elem['RowIndex'] = row_index
+                        if row_span is not None:
+                            elem['RowSpan'] = row_span
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                break
+
+        if not found:
+            raise ValueError(f"Layout element for visual '{visual_id}' not found")
+
+        return self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+
+    # =========================================================================
+    # PARAMETER MANAGEMENT
+    # =========================================================================
+
+    def add_parameter(
+        self,
+        analysis_id: str,
+        parameter_definition: Dict,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Add a parameter to an analysis.
+
+        Args:
+            analysis_id: Analysis ID.
+            parameter_definition: Full parameter declaration dict.
+
+        Raises:
+            ValueError: If a parameter with the same name already exists.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        params = definition.setdefault('ParameterDeclarations', [])
+
+        # Extract name from any parameter type
+        new_name = None
+        for ptype in ('StringParameterDeclaration', 'IntegerParameterDeclaration',
+                       'DecimalParameterDeclaration', 'DateTimeParameterDeclaration'):
+            if ptype in parameter_definition:
+                new_name = parameter_definition[ptype].get('Name')
+                break
+
+        if new_name:
+            for p in params:
+                for ptype in ('StringParameterDeclaration', 'IntegerParameterDeclaration',
+                               'DecimalParameterDeclaration', 'DateTimeParameterDeclaration'):
+                    if ptype in p and p[ptype].get('Name') == new_name:
+                        raise ValueError(f"Parameter '{new_name}' already exists")
+
+        params.append(parameter_definition)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+        result['parameter_name'] = new_name
+        return result
+
+    def delete_parameter(
+        self,
+        analysis_id: str,
+        parameter_name: str,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Delete a parameter by name.
+
+        Raises:
+            ValueError: If the parameter is not found.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        params = definition.get('ParameterDeclarations', [])
+        original_count = len(params)
+
+        def _matches(p: Dict) -> bool:
+            for ptype in ('StringParameterDeclaration', 'IntegerParameterDeclaration',
+                           'DecimalParameterDeclaration', 'DateTimeParameterDeclaration'):
+                if ptype in p and p[ptype].get('Name') == parameter_name:
+                    return True
+            return False
+
+        definition['ParameterDeclarations'] = [p for p in params if not _matches(p)]
+        if len(definition['ParameterDeclarations']) == original_count:
+            raise ValueError(f"Parameter '{parameter_name}' not found")
+
+        return self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+
+    # =========================================================================
+    # FILTER GROUP MANAGEMENT
+    # =========================================================================
+
+    def add_filter_group(
+        self,
+        analysis_id: str,
+        filter_group_definition: Dict,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Add a filter group to an analysis.
+
+        Args:
+            analysis_id: Analysis ID.
+            filter_group_definition: Full filter group dict with FilterGroupId, Filters, etc.
+
+        Raises:
+            ValueError: If a filter group with the same ID already exists.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        filter_groups = definition.setdefault('FilterGroups', [])
+
+        new_id = filter_group_definition.get('FilterGroupId')
+        if new_id and any(fg.get('FilterGroupId') == new_id for fg in filter_groups):
+            raise ValueError(f"Filter group '{new_id}' already exists")
+
+        filter_groups.append(filter_group_definition)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+        result['filter_group_id'] = new_id
+        return result
+
+    def delete_filter_group(
+        self,
+        analysis_id: str,
+        filter_group_id: str,
+        backup_first: bool = True,
+        use_optimistic_locking: Optional[bool] = None,
+    ) -> Dict:
+        """Delete a filter group by ID.
+
+        Raises:
+            ValueError: If the filter group is not found.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        fgs = definition.get('FilterGroups', [])
+        original_count = len(fgs)
+
+        definition['FilterGroups'] = [
+            fg for fg in fgs if fg.get('FilterGroupId') != filter_group_id
+        ]
+        if len(definition['FilterGroups']) == original_count:
+            raise ValueError(f"Filter group '{filter_group_id}' not found")
+
+        return self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(use_optimistic_locking) else None
+            ),
+        )
+
+    # =========================================================================
+    # BATCH & REPLICATION OPERATIONS
+    # =========================================================================
+
+    def replicate_sheet(
+        self,
+        analysis_id: str,
+        source_sheet_id: str,
+        target_sheet_name: str,
+        target_sheet_id: Optional[str] = None,
+        id_prefix: str = 'rc_',
+        backup_first: bool = True,
+    ) -> Dict:
+        """Copy all visuals from one sheet to a new sheet in the same analysis.
+
+        This performs a batch copy in a single API call, which is much more
+        reliable than adding visuals one at a time. Visual IDs are prefixed
+        to avoid conflicts. Layout positions are preserved from the source.
+
+        Args:
+            analysis_id: Analysis ID.
+            source_sheet_id: Sheet ID to copy visuals from.
+            target_sheet_name: Name for the new sheet.
+            target_sheet_id: Optional ID for the new sheet (auto-generated if omitted).
+            id_prefix: Prefix for new visual IDs (default ``'rc_'``).
+            backup_first: Back up before writing.
+
+        Returns:
+            dict with ``analysis_id``, ``sheet_id``, ``visual_count``,
+            ``visual_types``.
+        """
+        import copy as _copy
+
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+
+        # Check sheet limit (QuickSight max is 20 sheets per analysis)
+        current_sheets = definition.get('Sheets', [])
+        if len(current_sheets) >= 20:
+            raise ValueError(
+                f"Cannot add sheet: analysis already has {len(current_sheets)} sheets "
+                f"(QuickSight max is 20). Delete a sheet first."
+            )
+
+        # Find source sheet
+        source_sheet = None
+        for s in current_sheets:
+            if s.get('SheetId') == source_sheet_id:
+                source_sheet = s
+                break
+        if not source_sheet:
+            raise ValueError(f"Source sheet '{source_sheet_id}' not found")
+
+        # Build layout map from source
+        src_layouts = (
+            source_sheet.get('Layouts', [{}])[0]
+            .get('Configuration', {})
+            .get('GridLayout', {})
+            .get('Elements', [])
+        )
+        layout_map = {le['ElementId']: le for le in src_layouts if 'ElementId' in le}
+
+        # Create new sheet
+        new_sheet_id = target_sheet_id or str(uuid.uuid4())
+        new_visuals = []
+        new_layout_elements = []
+        type_counts: Dict[str, int] = {}
+
+        for v in source_sheet.get('Visuals', []):
+            visual_type = None
+            old_id = None
+            for vtype in _VISUAL_TYPES:
+                if vtype in v:
+                    visual_type = vtype
+                    old_id = v[vtype].get('VisualId', '')
+                    break
+            if not visual_type:
+                continue
+
+            new_id = f'{id_prefix}{old_id}'
+            new_visual = _copy.deepcopy(v)
+            new_visual[visual_type]['VisualId'] = new_id
+            new_visuals.append(new_visual)
+            type_counts[visual_type] = type_counts.get(visual_type, 0) + 1
+
+            # Copy layout
+            if old_id in layout_map:
+                le = _copy.deepcopy(layout_map[old_id])
+                le['ElementId'] = new_id
+                new_layout_elements.append(le)
+            else:
+                new_layout_elements.append({
+                    'ElementId': new_id,
+                    'ElementType': 'VISUAL',
+                    'ColumnIndex': 0,
+                    'ColumnSpan': 36,
+                    'RowIndex': len(new_layout_elements) * 12,
+                    'RowSpan': 12,
+                })
+
+        new_sheet = {
+            'SheetId': new_sheet_id,
+            'Name': target_sheet_name,
+            'ContentType': 'INTERACTIVE',
+            'Visuals': new_visuals,
+            'Layouts': [{
+                'Configuration': {
+                    'GridLayout': {
+                        'Elements': new_layout_elements,
+                    }
+                }
+            }],
+        }
+        definition.setdefault('Sheets', []).append(new_sheet)
+
+        self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        logger.info(
+            "Replicated sheet %s -> %s (%d visuals)",
+            source_sheet_id, new_sheet_id, len(new_visuals),
+        )
+        return {
+            'analysis_id': analysis_id,
+            'sheet_id': new_sheet_id,
+            'sheet_name': target_sheet_name,
+            'visual_count': len(new_visuals),
+            'visual_types': type_counts,
+        }
