@@ -1,0 +1,366 @@
+"""Analysis MCP tools for QuickSight.
+
+Provides tools for listing, searching, and inspecting QuickSight analyses --
+including their sheets, visuals, calculated fields, parameters, and filters.
+"""
+
+import time
+import logging
+from typing import Callable
+
+from fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
+
+
+def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable):
+    """Register all analysis-related MCP tools."""
+
+    @mcp.tool
+    def list_analyses() -> dict:
+        """List all QuickSight analyses with their names, IDs, and status.
+
+        Returns every analysis in the account. Results are cached for
+        5 minutes. Use this to discover analyses before inspecting them.
+
+        Each entry includes:
+        - name: Human-readable analysis name
+        - id: Analysis ID (use this for other analysis operations)
+        - status: CREATION_SUCCESSFUL, UPDATE_SUCCESSFUL, etc.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            analyses = client.list_analyses()
+            result = {
+                "count": len(analyses),
+                "analyses": [
+                    {
+                        "name": a.get("Name"),
+                        "id": a.get("AnalysisId"),
+                        "status": a.get("Status"),
+                    }
+                    for a in analyses
+                ],
+            }
+            get_tracker().record_call(
+                "list_analyses", {}, (time.time() - start) * 1000, True
+            )
+            return result
+        except Exception as e:
+            get_tracker().record_call(
+                "list_analyses", {}, (time.time() - start) * 1000, False, str(e)
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def search_analyses(name: str) -> dict:
+        """Search QuickSight analyses by name (case-insensitive partial match).
+
+        Args:
+            name: Search string to match against analysis names.
+                  Example: "WBR" matches "Ops-WBR", "WBR Weekly", etc.
+
+        Returns matching analyses with their IDs and statuses.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            results = client.search_analyses(name)
+            result = {
+                "query": name,
+                "count": len(results),
+                "analyses": [
+                    {
+                        "name": a.get("Name"),
+                        "id": a.get("AnalysisId"),
+                        "status": a.get("Status"),
+                    }
+                    for a in results
+                ],
+            }
+            get_tracker().record_call(
+                "search_analyses",
+                {"name": name},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return result
+        except Exception as e:
+            get_tracker().record_call(
+                "search_analyses",
+                {"name": name},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def describe_analysis(analysis_id: str) -> dict:
+        """Get a structured summary of a QuickSight analysis.
+
+        Returns an overview of the analysis structure without the full raw
+        definition -- ideal for understanding what an analysis contains
+        before making changes.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+
+        Returns:
+            - name, status, ARN
+            - sheets with their names, IDs, and visual counts
+            - total counts of calculated fields, parameters, and filter groups
+            - dataset identifiers used by the analysis
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            definition = client.get_analysis_definition(analysis_id)
+            analysis = client.get_analysis(analysis_id)
+
+            # Extract sheets summary
+            sheets_raw = definition.get("Definition", {}).get("Sheets", [])
+            sheets = []
+            for s in sheets_raw:
+                visuals = s.get("Visuals", [])
+                sheets.append(
+                    {
+                        "name": s.get("Name", ""),
+                        "id": s.get("SheetId", ""),
+                        "visual_count": len(visuals),
+                    }
+                )
+
+            calc_fields = definition.get("Definition", {}).get(
+                "CalculatedFields", []
+            )
+            params = definition.get("Definition", {}).get(
+                "ParameterDeclarations", []
+            )
+            filter_groups = definition.get("Definition", {}).get(
+                "FilterGroups", []
+            )
+            ds_id_decls = definition.get("Definition", {}).get(
+                "DataSetIdentifierDeclarations", []
+            )
+
+            result = {
+                "analysis_id": analysis_id,
+                "name": analysis.get("Name", ""),
+                "status": analysis.get("Status", ""),
+                "sheets_count": len(sheets),
+                "sheets": sheets,
+                "calculated_fields_count": len(calc_fields),
+                "parameters_count": len(params),
+                "filter_groups_count": len(filter_groups),
+                "dataset_identifiers": [
+                    {
+                        "identifier": d.get("Identifier"),
+                        "dataset_arn": d.get("DataSetArn"),
+                    }
+                    for d in ds_id_decls
+                ],
+            }
+            get_tracker().record_call(
+                "describe_analysis",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return result
+        except Exception as e:
+            get_tracker().record_call(
+                "describe_analysis",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def list_visuals(analysis_id: str) -> dict:
+        """List all visuals in a QuickSight analysis with type and location info.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+
+        Returns every visual across all sheets, including:
+        - visual_id: Unique visual identifier
+        - type: Visual type (e.g., TableVisual, BarChartVisual, KPIVisual)
+        - title: Visual title (if set)
+        - sheet_name: Which sheet the visual is on
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            visuals = client.get_visuals(analysis_id)
+            get_tracker().record_call(
+                "list_visuals",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "analysis_id": analysis_id,
+                "count": len(visuals),
+                "visuals": visuals,
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "list_visuals",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def list_calculated_fields(analysis_id: str) -> dict:
+        """List all calculated fields in a QuickSight analysis.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+
+        Returns each calculated field with:
+        - name: The field name
+        - expression: The QuickSight expression (e.g., sum({Revenue}))
+        - dataset_identifier: Which dataset the field belongs to
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            fields = client.get_calculated_fields(analysis_id)
+            get_tracker().record_call(
+                "list_calculated_fields",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "analysis_id": analysis_id,
+                "count": len(fields),
+                "calculated_fields": fields,
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "list_calculated_fields",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def get_columns_used(analysis_id: str) -> dict:
+        """Get a frequency map of columns used across an analysis.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+
+        Returns a dict mapping column names to the number of times they
+        appear in visuals, calculated fields, filters, etc. Useful for
+        understanding which columns are most important and for impact
+        analysis before modifying a dataset.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            usage = client.get_columns_used(analysis_id)
+            # Sort by frequency descending
+            sorted_usage = dict(
+                sorted(usage.items(), key=lambda x: x[1], reverse=True)
+            )
+            get_tracker().record_call(
+                "get_columns_used",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "analysis_id": analysis_id,
+                "unique_columns": len(sorted_usage),
+                "columns": sorted_usage,
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "get_columns_used",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def get_parameters(analysis_id: str) -> dict:
+        """List all parameters defined in a QuickSight analysis.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+
+        Returns parameter declarations with names, types, and default values.
+        Parameters drive dynamic filters and controls in dashboards.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            params = client.get_parameters(analysis_id)
+            get_tracker().record_call(
+                "get_parameters",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "analysis_id": analysis_id,
+                "count": len(params),
+                "parameters": params,
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "get_parameters",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def get_filters(analysis_id: str) -> dict:
+        """List all filter groups defined in a QuickSight analysis.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+
+        Returns filter group definitions including scope (which sheets/visuals
+        they apply to) and the filter conditions.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            filters = client.get_filters(analysis_id)
+            get_tracker().record_call(
+                "get_filters",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "analysis_id": analysis_id,
+                "count": len(filters),
+                "filter_groups": filters,
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "get_filters",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
