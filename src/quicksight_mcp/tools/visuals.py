@@ -266,3 +266,229 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
                 str(e),
             )
             return {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Chart Builder Tools (simple-parameter visual creation)
+    # ------------------------------------------------------------------
+
+    @mcp.tool
+    def create_kpi(
+        analysis_id: str, sheet_id: str, title: str,
+        column: str, aggregation: str, dataset_identifier: str,
+    ) -> dict:
+        """Create a KPI visual from simple parameters.
+
+        This is the easiest way to add a KPI. Just provide the column
+        name and aggregation — the full visual definition is constructed
+        automatically.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            sheet_id: The sheet to add the KPI to.
+            title: Display title (e.g., "Total Contracts").
+            column: Column name (e.g., "FLIP_TOKEN").
+            aggregation: SUM, COUNT, AVG, MIN, MAX, or DISTINCT_COUNT.
+            dataset_identifier: The dataset identifier. Find available
+                identifiers using describe_analysis.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.create_kpi(
+                analysis_id, sheet_id, title, column, aggregation, dataset_identifier
+            )
+            get_tracker().record_call(
+                "create_kpi",
+                {"analysis_id": analysis_id, "title": title},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "visual_id": result.get("visual_id"),
+                "title": title,
+                "note": "KPI created. Use set_visual_layout to reposition.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "create_kpi", {"analysis_id": analysis_id},
+                (time.time() - start) * 1000, False, str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def create_bar_chart(
+        analysis_id: str, sheet_id: str, title: str,
+        category_column: str, value_column: str, value_aggregation: str,
+        dataset_identifier: str, orientation: str = "VERTICAL",
+    ) -> dict:
+        """Create a bar chart from simple parameters.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            sheet_id: The sheet to add the chart to.
+            title: Display title.
+            category_column: Dimension column for X-axis (e.g., "MARKET_NAME").
+            value_column: Measure column for Y-axis (e.g., "FLIP_TOKEN").
+            value_aggregation: SUM, COUNT, AVG, etc.
+            dataset_identifier: The dataset identifier.
+            orientation: VERTICAL (default) or HORIZONTAL.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.create_bar_chart(
+                analysis_id, sheet_id, title, category_column,
+                value_column, value_aggregation, dataset_identifier, orientation,
+            )
+            get_tracker().record_call(
+                "create_bar_chart",
+                {"analysis_id": analysis_id, "title": title},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "visual_id": result.get("visual_id"),
+                "title": title,
+                "note": "Bar chart created. Use set_visual_layout to reposition.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "create_bar_chart", {"analysis_id": analysis_id},
+                (time.time() - start) * 1000, False, str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def create_line_chart(
+        analysis_id: str, sheet_id: str, title: str,
+        date_column: str, value_column: str, value_aggregation: str,
+        dataset_identifier: str, date_granularity: str = "WEEK",
+    ) -> dict:
+        """Create a line chart from simple parameters.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            sheet_id: The sheet to add the chart to.
+            title: Display title.
+            date_column: Date column for X-axis.
+            value_column: Measure column for Y-axis.
+            value_aggregation: SUM, COUNT, AVG, etc.
+            dataset_identifier: The dataset identifier.
+            date_granularity: DAY, WEEK, MONTH, QUARTER, or YEAR.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.create_line_chart(
+                analysis_id, sheet_id, title, date_column,
+                value_column, value_aggregation, dataset_identifier, date_granularity,
+            )
+            get_tracker().record_call(
+                "create_line_chart",
+                {"analysis_id": analysis_id, "title": title},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "visual_id": result.get("visual_id"),
+                "title": title,
+                "note": "Line chart created. Use set_visual_layout to reposition.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "create_line_chart", {"analysis_id": analysis_id},
+                (time.time() - start) * 1000, False, str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def create_pivot_table(
+        analysis_id: str, sheet_id: str, title: str,
+        row_columns: str, value_columns: str, value_aggregations: str,
+        dataset_identifier: str,
+    ) -> dict:
+        """Create a pivot table from simple parameters.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            sheet_id: The sheet to add the table to.
+            title: Display title.
+            row_columns: Comma-separated dimension columns for rows
+                (e.g., "MARKET_NAME,ASSESSMENT_TYPE").
+            value_columns: Comma-separated measure columns for values
+                (e.g., "FLIP_TOKEN,REVENUE").
+            value_aggregations: Comma-separated aggregations, one per value
+                (e.g., "COUNT,SUM").
+            dataset_identifier: The dataset identifier.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            rows = [c.strip() for c in row_columns.split(',')]
+            vals = [c.strip() for c in value_columns.split(',')]
+            aggs = [a.strip() for a in value_aggregations.split(',')]
+            result = client.create_pivot_table(
+                analysis_id, sheet_id, title, rows, vals, aggs, dataset_identifier
+            )
+            get_tracker().record_call(
+                "create_pivot_table",
+                {"analysis_id": analysis_id, "title": title},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "visual_id": result.get("visual_id"),
+                "title": title,
+                "note": "Pivot table created. Use set_visual_layout to reposition.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "create_pivot_table", {"analysis_id": analysis_id},
+                (time.time() - start) * 1000, False, str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def create_table(
+        analysis_id: str, sheet_id: str, title: str,
+        columns: str, dataset_identifier: str,
+    ) -> dict:
+        """Create a flat table visual from simple parameters.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            sheet_id: The sheet to add the table to.
+            title: Display title.
+            columns: Comma-separated column names to display
+                (e.g., "FLIP_TOKEN,MARKET_NAME,PURCHASE_AGREEMENT_COMPLETED_AT").
+            dataset_identifier: The dataset identifier.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            cols = [c.strip() for c in columns.split(',')]
+            result = client.create_table(
+                analysis_id, sheet_id, title, cols, dataset_identifier
+            )
+            get_tracker().record_call(
+                "create_table",
+                {"analysis_id": analysis_id, "title": title},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "visual_id": result.get("visual_id"),
+                "title": title,
+                "note": "Table created. Use set_visual_layout to reposition.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "create_table", {"analysis_id": analysis_id},
+                (time.time() - start) * 1000, False, str(e),
+            )
+            return {"error": str(e)}

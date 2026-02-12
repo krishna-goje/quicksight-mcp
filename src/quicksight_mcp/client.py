@@ -2120,3 +2120,565 @@ class QuickSightClient:
             'visual_count': len(new_visuals),
             'visual_types': type_counts,
         }
+
+    # =========================================================================
+    # CHART BUILDER HELPERS
+    # =========================================================================
+
+    # Aggregation alias map: accept common variants
+    _AGG_MAP = {
+        'SUM': 'SUM', 'COUNT': 'COUNT', 'AVG': 'AVERAGE',
+        'AVERAGE': 'AVERAGE', 'MIN': 'MIN', 'MAX': 'MAX',
+        'DISTINCT_COUNT': 'DISTINCT_COUNT', 'STDEV': 'STDEV',
+        'VAR': 'VAR', 'MEDIAN': 'MEDIAN',
+    }
+
+    @staticmethod
+    def _make_measure_field(
+        column: str, dataset_identifier: str, aggregation: str = 'SUM',
+        field_id: Optional[str] = None,
+    ) -> Dict:
+        """Construct a NumericalMeasureField definition."""
+        agg = QuickSightClient._AGG_MAP.get(aggregation.upper(), aggregation.upper())
+        return {
+            'NumericalMeasureField': {
+                'FieldId': field_id or f'{uuid.uuid4().hex[:8]}.{column}',
+                'Column': {
+                    'DataSetIdentifier': dataset_identifier,
+                    'ColumnName': column,
+                },
+                'AggregationFunction': {
+                    'SimpleNumericalAggregation': agg,
+                },
+            }
+        }
+
+    @staticmethod
+    def _make_dimension_field(
+        column: str, dataset_identifier: str,
+        field_id: Optional[str] = None, is_date: bool = False,
+        date_granularity: str = 'DAY',
+    ) -> Dict:
+        """Construct a CategoricalDimensionField or DateDimensionField."""
+        fid = field_id or f'{uuid.uuid4().hex[:8]}.{column}'
+        if is_date:
+            return {
+                'DateDimensionField': {
+                    'FieldId': fid,
+                    'Column': {
+                        'DataSetIdentifier': dataset_identifier,
+                        'ColumnName': column,
+                    },
+                    'DateGranularity': date_granularity.upper(),
+                }
+            }
+        return {
+            'CategoricalDimensionField': {
+                'FieldId': fid,
+                'Column': {
+                    'DataSetIdentifier': dataset_identifier,
+                    'ColumnName': column,
+                },
+            }
+        }
+
+    def _append_visual_to_sheet(
+        self, definition: Dict, sheet_id: str,
+        visual_def: Dict, visual_id: str,
+        col_span: int = 36, row_span: int = 12,
+    ) -> None:
+        """Add visual + layout element to a sheet within a definition dict."""
+        for sheet in definition.get('Sheets', []):
+            if sheet.get('SheetId') == sheet_id:
+                sheet.setdefault('Visuals', []).append(visual_def)
+                layouts = sheet.setdefault('Layouts', [])
+                if not layouts:
+                    layouts.append({'Configuration': {'GridLayout': {'Elements': []}}})
+                elements = (
+                    layouts[0]
+                    .setdefault('Configuration', {})
+                    .setdefault('GridLayout', {})
+                    .setdefault('Elements', [])
+                )
+                max_row = max(
+                    (e.get('RowIndex', 0) + e.get('RowSpan', 0) for e in elements),
+                    default=0,
+                )
+                elements.append({
+                    'ElementId': visual_id,
+                    'ElementType': 'VISUAL',
+                    'ColumnIndex': 0,
+                    'ColumnSpan': col_span,
+                    'RowIndex': max_row,
+                    'RowSpan': row_span,
+                })
+                return
+        raise ValueError(f"Sheet '{sheet_id}' not found")
+
+    def create_kpi(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        title: str,
+        column: str,
+        aggregation: str,
+        dataset_identifier: str,
+        backup_first: bool = True,
+    ) -> Dict:
+        """Create a KPI visual from simple parameters.
+
+        Args:
+            analysis_id: Analysis ID.
+            sheet_id: Target sheet.
+            title: Display title (e.g., "Total Contracts").
+            column: Column name (e.g., "FLIP_TOKEN").
+            aggregation: SUM, COUNT, AVG, MIN, MAX, DISTINCT_COUNT.
+            dataset_identifier: Dataset identifier string.
+
+        Returns:
+            dict with ``visual_id``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        visual_id = f'kpi_{uuid.uuid4().hex[:12]}'
+        measure = self._make_measure_field(column, dataset_identifier, aggregation)
+
+        visual_def = {
+            'KPIVisual': {
+                'VisualId': visual_id,
+                'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': title}},
+                'Subtitle': {'Visibility': 'HIDDEN'},
+                'ChartConfiguration': {
+                    'FieldWells': {
+                        'Values': [measure],
+                        'TargetValues': [],
+                        'TrendGroups': [],
+                    },
+                },
+            }
+        }
+
+        self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id, col_span=12, row_span=6)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        if self._should_verify(None):
+            self._verify_visual_exists(analysis_id, visual_id)
+
+        result['visual_id'] = visual_id
+        return result
+
+    def create_bar_chart(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        title: str,
+        category_column: str,
+        value_column: str,
+        value_aggregation: str,
+        dataset_identifier: str,
+        orientation: str = 'VERTICAL',
+        backup_first: bool = True,
+    ) -> Dict:
+        """Create a bar chart from simple parameters.
+
+        Args:
+            analysis_id: Analysis ID.
+            sheet_id: Target sheet.
+            title: Display title.
+            category_column: Dimension column (X-axis).
+            value_column: Measure column (Y-axis).
+            value_aggregation: SUM, COUNT, etc.
+            dataset_identifier: Dataset identifier.
+            orientation: VERTICAL or HORIZONTAL.
+
+        Returns:
+            dict with ``visual_id``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        visual_id = f'bar_{uuid.uuid4().hex[:12]}'
+
+        category = self._make_dimension_field(category_column, dataset_identifier)
+        value = self._make_measure_field(value_column, dataset_identifier, value_aggregation)
+
+        visual_def = {
+            'BarChartVisual': {
+                'VisualId': visual_id,
+                'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': title}},
+                'Subtitle': {'Visibility': 'HIDDEN'},
+                'ChartConfiguration': {
+                    'FieldWells': {
+                        'BarChartAggregatedFieldWells': {
+                            'Category': [category],
+                            'Values': [value],
+                            'Colors': [],
+                            'SmallMultiples': [],
+                        }
+                    },
+                    'Orientation': orientation.upper(),
+                    'BarsArrangement': 'CLUSTERED',
+                },
+            }
+        }
+
+        self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        if self._should_verify(None):
+            self._verify_visual_exists(analysis_id, visual_id)
+
+        result['visual_id'] = visual_id
+        return result
+
+    def create_line_chart(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        title: str,
+        date_column: str,
+        value_column: str,
+        value_aggregation: str,
+        dataset_identifier: str,
+        date_granularity: str = 'WEEK',
+        backup_first: bool = True,
+    ) -> Dict:
+        """Create a line chart from simple parameters.
+
+        Args:
+            analysis_id: Analysis ID.
+            sheet_id: Target sheet.
+            title: Display title.
+            date_column: Date column for X-axis.
+            value_column: Measure column for Y-axis.
+            value_aggregation: SUM, COUNT, etc.
+            dataset_identifier: Dataset identifier.
+            date_granularity: DAY, WEEK, MONTH, QUARTER, YEAR.
+
+        Returns:
+            dict with ``visual_id``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        visual_id = f'line_{uuid.uuid4().hex[:12]}'
+
+        category = self._make_dimension_field(
+            date_column, dataset_identifier, is_date=True,
+            date_granularity=date_granularity,
+        )
+        value = self._make_measure_field(value_column, dataset_identifier, value_aggregation)
+
+        visual_def = {
+            'LineChartVisual': {
+                'VisualId': visual_id,
+                'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': title}},
+                'Subtitle': {'Visibility': 'HIDDEN'},
+                'ChartConfiguration': {
+                    'FieldWells': {
+                        'LineChartAggregatedFieldWells': {
+                            'Category': [category],
+                            'Values': [value],
+                            'Colors': [],
+                            'SmallMultiples': [],
+                        }
+                    },
+                },
+            }
+        }
+
+        self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        if self._should_verify(None):
+            self._verify_visual_exists(analysis_id, visual_id)
+
+        result['visual_id'] = visual_id
+        return result
+
+    def create_pivot_table(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        title: str,
+        row_columns: List[str],
+        value_columns: List[str],
+        value_aggregations: List[str],
+        dataset_identifier: str,
+        backup_first: bool = True,
+    ) -> Dict:
+        """Create a pivot table from simple parameters.
+
+        Args:
+            analysis_id: Analysis ID.
+            sheet_id: Target sheet.
+            title: Display title.
+            row_columns: List of dimension columns for rows.
+            value_columns: List of measure columns for values.
+            value_aggregations: List of aggregations (one per value column).
+            dataset_identifier: Dataset identifier.
+
+        Returns:
+            dict with ``visual_id``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        visual_id = f'pivot_{uuid.uuid4().hex[:12]}'
+
+        rows = [self._make_dimension_field(c, dataset_identifier) for c in row_columns]
+        values = [
+            self._make_measure_field(c, dataset_identifier, a)
+            for c, a in zip(value_columns, value_aggregations)
+        ]
+
+        visual_def = {
+            'PivotTableVisual': {
+                'VisualId': visual_id,
+                'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': title}},
+                'Subtitle': {'Visibility': 'HIDDEN'},
+                'ChartConfiguration': {
+                    'FieldWells': {
+                        'PivotTableAggregatedFieldWells': {
+                            'Rows': rows,
+                            'Columns': [],
+                            'Values': values,
+                        }
+                    },
+                },
+            }
+        }
+
+        self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id, row_span=16)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        if self._should_verify(None):
+            self._verify_visual_exists(analysis_id, visual_id)
+
+        result['visual_id'] = visual_id
+        return result
+
+    def create_table(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        title: str,
+        columns: List[str],
+        dataset_identifier: str,
+        backup_first: bool = True,
+    ) -> Dict:
+        """Create a flat table visual from simple parameters.
+
+        Args:
+            analysis_id: Analysis ID.
+            sheet_id: Target sheet.
+            title: Display title.
+            columns: List of column names to display.
+            dataset_identifier: Dataset identifier.
+
+        Returns:
+            dict with ``visual_id``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        visual_id = f'tbl_{uuid.uuid4().hex[:12]}'
+
+        grouped = [self._make_dimension_field(c, dataset_identifier) for c in columns]
+
+        visual_def = {
+            'TableVisual': {
+                'VisualId': visual_id,
+                'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': title}},
+                'Subtitle': {'Visibility': 'HIDDEN'},
+                'ChartConfiguration': {
+                    'FieldWells': {
+                        'TableAggregatedFieldWells': {
+                            'GroupBy': grouped,
+                            'Values': [],
+                        }
+                    },
+                },
+            }
+        }
+
+        self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id, row_span=16)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        if self._should_verify(None):
+            self._verify_visual_exists(analysis_id, visual_id)
+
+        result['visual_id'] = visual_id
+        return result
+
+    # =========================================================================
+    # SNAPSHOT & DIFF (QA)
+    # =========================================================================
+
+    def snapshot_analysis(self, analysis_id: str) -> Dict:
+        """Capture a lightweight snapshot of the current analysis state for QA diffing.
+
+        Returns:
+            dict with ``snapshot_id``, ``sheets``, ``visuals``, ``calc_fields``, etc.
+            Also saves the snapshot to ``~/.quicksight-mcp/snapshots/``.
+        """
+        self.clear_analysis_def_cache(analysis_id)
+        analysis = self.get_analysis(analysis_id)
+        definition = self.get_analysis_definition(analysis_id)
+
+        snapshot_id = f"snap_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        sheets = []
+        visuals = []
+        for s in definition.get('Sheets', []):
+            sheet_visuals = []
+            for v in s.get('Visuals', []):
+                parsed = self._parse_visual(v)
+                parsed['sheet_id'] = s.get('SheetId', '')
+                visuals.append(parsed)
+                sheet_visuals.append(parsed)
+            sheets.append({
+                'id': s.get('SheetId', ''),
+                'name': s.get('Name', ''),
+                'visual_count': len(sheet_visuals),
+            })
+
+        calc_fields = [
+            {'name': f.get('Name', ''), 'dataset': f.get('DataSetIdentifier', ''),
+             'expression': f.get('Expression', '')}
+            for f in definition.get('CalculatedFields', [])
+        ]
+
+        snapshot = {
+            'snapshot_id': snapshot_id,
+            'analysis_id': analysis_id,
+            'analysis_name': analysis.get('Name', ''),
+            'timestamp': datetime.now().isoformat(),
+            'status': analysis.get('Status', ''),
+            'sheets': sheets,
+            'visuals': visuals,
+            'calc_fields': calc_fields,
+            'parameter_count': len(definition.get('ParameterDeclarations', [])),
+            'filter_group_count': len(definition.get('FilterGroups', [])),
+        }
+
+        # Save to disk
+        snap_dir = Path(self._backup_dir()).parent / 'snapshots'
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        snap_file = snap_dir / f'{snapshot_id}.json'
+        with open(snap_file, 'w') as f:
+            json.dump(snapshot, f, indent=2, default=str)
+
+        snapshot['snapshot_file'] = str(snap_file)
+        return snapshot
+
+    def diff_analysis(self, analysis_id: str, snapshot_id: str) -> Dict:
+        """Compare current analysis state against a saved snapshot.
+
+        Args:
+            analysis_id: Analysis ID.
+            snapshot_id: Snapshot ID from a previous ``snapshot_analysis`` call.
+
+        Returns:
+            dict with added/removed/changed items across sheets, visuals, calc fields.
+        """
+        # Load snapshot
+        snap_dir = Path(self._backup_dir()).parent / 'snapshots'
+        snap_file = snap_dir / f'{snapshot_id}.json'
+        if not snap_file.exists():
+            raise ValueError(f"Snapshot '{snapshot_id}' not found at {snap_file}")
+
+        with open(snap_file) as f:
+            snapshot = json.load(f)
+
+        # Get current state
+        current = self.snapshot_analysis(analysis_id)
+
+        # Diff sheets
+        old_sheets = {s['id']: s for s in snapshot.get('sheets', [])}
+        new_sheets = {s['id']: s for s in current.get('sheets', [])}
+
+        sheets_added = [s for sid, s in new_sheets.items() if sid not in old_sheets]
+        sheets_removed = [s for sid, s in old_sheets.items() if sid not in new_sheets]
+
+        # Diff visuals
+        old_visuals = {v['visual_id']: v for v in snapshot.get('visuals', [])}
+        new_visuals = {v['visual_id']: v for v in current.get('visuals', [])}
+
+        visuals_added = [v for vid, v in new_visuals.items() if vid not in old_visuals]
+        visuals_removed = [v for vid, v in old_visuals.items() if vid not in new_visuals]
+
+        visual_changes = []
+        for vid in set(old_visuals) & set(new_visuals):
+            old_v, new_v = old_visuals[vid], new_visuals[vid]
+            if old_v.get('title') != new_v.get('title'):
+                visual_changes.append({
+                    'visual_id': vid, 'field': 'title',
+                    'old': old_v.get('title'), 'new': new_v.get('title'),
+                })
+            if old_v.get('type') != new_v.get('type'):
+                visual_changes.append({
+                    'visual_id': vid, 'field': 'type',
+                    'old': old_v.get('type'), 'new': new_v.get('type'),
+                })
+
+        # Diff calc fields
+        old_cfs = {f['name']: f for f in snapshot.get('calc_fields', [])}
+        new_cfs = {f['name']: f for f in current.get('calc_fields', [])}
+
+        calc_fields_added = [f for name, f in new_cfs.items() if name not in old_cfs]
+        calc_fields_removed = [f for name, f in old_cfs.items() if name not in new_cfs]
+        calc_fields_changed = []
+        for name in set(old_cfs) & set(new_cfs):
+            if old_cfs[name].get('expression') != new_cfs[name].get('expression'):
+                calc_fields_changed.append({
+                    'name': name,
+                    'old_expression': old_cfs[name].get('expression'),
+                    'new_expression': new_cfs[name].get('expression'),
+                })
+
+        has_changes = any([
+            sheets_added, sheets_removed, visuals_added, visuals_removed,
+            visual_changes, calc_fields_added, calc_fields_removed, calc_fields_changed,
+        ])
+
+        return {
+            'analysis_id': analysis_id,
+            'snapshot_id': snapshot_id,
+            'has_changes': has_changes,
+            'sheets_added': sheets_added,
+            'sheets_removed': sheets_removed,
+            'visuals_added': visuals_added,
+            'visuals_removed': visuals_removed,
+            'visual_changes': visual_changes,
+            'calc_fields_added': calc_fields_added,
+            'calc_fields_removed': calc_fields_removed,
+            'calc_fields_changed': calc_fields_changed,
+            'summary': {
+                'old_visual_count': len(old_visuals),
+                'new_visual_count': len(new_visuals),
+                'old_calc_field_count': len(old_cfs),
+                'new_calc_field_count': len(new_cfs),
+            },
+        }

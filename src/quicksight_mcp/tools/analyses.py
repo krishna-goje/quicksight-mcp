@@ -435,3 +435,72 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
                 str(e),
             )
             return {"error": str(e)}
+
+    @mcp.tool
+    def snapshot_analysis(analysis_id: str) -> dict:
+        """Take a snapshot of the current analysis state for QA comparison.
+
+        Use this BEFORE making changes. After changes, use diff_analysis
+        to compare and verify exactly what changed.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+
+        Returns the snapshot with a snapshot_id to use with diff_analysis.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.snapshot_analysis(analysis_id)
+            get_tracker().record_call(
+                "snapshot_analysis",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return result
+        except Exception as e:
+            get_tracker().record_call(
+                "snapshot_analysis",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def diff_analysis(analysis_id: str, snapshot_id: str) -> dict:
+        """Compare current analysis state against a previous snapshot.
+
+        Use AFTER making changes to see what was added, removed, or
+        modified. This is the QA reviewer — ensures changes had the
+        intended effect and nothing unexpected broke.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            snapshot_id: The snapshot_id from a previous snapshot_analysis call.
+
+        Returns a detailed diff: added/removed/changed sheets, visuals,
+        and calculated fields.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.diff_analysis(analysis_id, snapshot_id)
+            get_tracker().record_call(
+                "diff_analysis",
+                {"analysis_id": analysis_id, "snapshot_id": snapshot_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return result
+        except Exception as e:
+            get_tracker().record_call(
+                "diff_analysis",
+                {"analysis_id": analysis_id, "snapshot_id": snapshot_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
