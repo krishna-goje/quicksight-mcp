@@ -561,6 +561,14 @@ class QuickSightClient:
 
         analysis = self.get_analysis(analysis_id)
 
+        # Pre-flight check: refuse to update a FAILED analysis
+        status = analysis.get('Status', '')
+        if 'FAILED' in status:
+            raise RuntimeError(
+                f"Cannot update analysis: current status is {status}. "
+                f"Restore from backup first using restore_analysis."
+            )
+
         # Optimistic locking check
         if expected_last_updated is not None:
             actual = analysis.get('LastUpdatedTime')
@@ -2138,15 +2146,31 @@ class QuickSightClient:
         column: str, dataset_identifier: str, aggregation: str = 'SUM',
         field_id: Optional[str] = None,
     ) -> Dict:
-        """Construct a NumericalMeasureField definition."""
+        """Construct a measure field definition.
+
+        Uses ``CategoricalMeasureField`` for COUNT/DISTINCT_COUNT
+        (which works on any column type), and ``NumericalMeasureField``
+        for numeric aggregations (SUM, AVG, MIN, MAX, etc.).
+        """
         agg = QuickSightClient._AGG_MAP.get(aggregation.upper(), aggregation.upper())
+        fid = field_id or f'{uuid.uuid4().hex[:8]}.{column}'
+        col = {'DataSetIdentifier': dataset_identifier, 'ColumnName': column}
+
+        # COUNT and DISTINCT_COUNT work on any column type via CategoricalMeasureField
+        if agg in ('COUNT', 'DISTINCT_COUNT'):
+            return {
+                'CategoricalMeasureField': {
+                    'FieldId': fid,
+                    'Column': col,
+                    'AggregationFunction': 'COUNT' if agg == 'COUNT' else 'DISTINCT_COUNT',
+                }
+            }
+
+        # Numeric aggregations require NumericalMeasureField
         return {
             'NumericalMeasureField': {
-                'FieldId': field_id or f'{uuid.uuid4().hex[:8]}.{column}',
-                'Column': {
-                    'DataSetIdentifier': dataset_identifier,
-                    'ColumnName': column,
-                },
+                'FieldId': fid,
+                'Column': col,
                 'AggregationFunction': {
                     'SimpleNumericalAggregation': agg,
                 },
