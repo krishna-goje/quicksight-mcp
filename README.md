@@ -8,7 +8,7 @@ The most comprehensive AWS QuickSight MCP server -- with self-learning capabilit
 
 ## Why This Server?
 
-Other QuickSight MCP servers are either auto-generated API wrappers or limited to lineage queries. This server was built by an analytics engineer who uses QuickSight daily in production, wrapping battle-tested patterns into 27 MCP tools.
+Other QuickSight MCP servers are either auto-generated API wrappers or limited to lineage queries. This server is extracted from a 4,800+ line production library, wrapping battle-tested patterns into 27 MCP tools.
 
 **Key Differentiators:**
 
@@ -296,6 +296,20 @@ pytest tests/test_learning.py
 ruff check src/ tests/
 ruff format src/ tests/
 ```
+
+## Author
+
+Built by [Krishna Goje](https://github.com/krishna-goje), Senior Analytics Engineer.
+
+This server is extracted from a 4,800+ line production library built over months of daily QuickSight work — managing datasets, analyses, dashboards, and calculated fields across multiple business-critical dashboards.
+
+Every safety feature exists because of a real production incident:
+- **Auto-backup** — because an update once wiped an analysis with no way to undo
+- **Optimistic locking** — because two sessions editing the same analysis silently overwrote each other
+- **Change verification** — because the QuickSight API returns `200 OK` but sometimes doesn't apply the change
+- **Destructive change protection** — because a malformed definition update deleted all sheets from a live dashboard
+
+The self-learning engine was built because the same mistakes kept happening — reserved SQL keywords, expired credentials mid-batch, forgotten SPICE refreshes after SQL updates. The server now remembers these patterns so you don't have to.
 
 ## Contributing
 
