@@ -44,6 +44,7 @@ quicksight-mcp = "quicksight_mcp.server:main"
 Homepage = "https://github.com/krishna-goje/quicksight-mcp"
 Repository = "https://github.com/krishna-goje/quicksight-mcp"
 Issues = "https://github.com/krishna-goje/quicksight-mcp/issues"
+Changelog = "https://github.com/krishna-goje/quicksight-mcp/blob/master/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/quicksight_mcp"]

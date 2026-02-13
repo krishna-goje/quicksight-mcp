@@ -42,3 +42,16 @@ Thumbs.db
 
 # Backup files
 *.bak
+
+# AWS credentials (NEVER commit)
+.aws/
+*.pem
+*.key
+
+# Secrets
+.env.local
+.env.*.local
+secrets.json
+
+# Claude Code
+.claude/

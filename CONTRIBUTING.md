@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing! This document outlines the development workflow and best practices.
 
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating. For security issues, see [SECURITY.md](SECURITY.md).
+
 ## Reporting Issues
 
 Before writing code, check [existing issues](https://github.com/krishna-goje/quicksight-mcp/issues) first.
