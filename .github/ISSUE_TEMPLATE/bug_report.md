@@ -7,17 +7,21 @@ assignees: ''
 ---
 
 ## Describe the bug
+
 <!-- A clear description of what the bug is. -->
 
 ## To Reproduce
+
 1. Call tool `...` with parameters `...`
 2. See error: `...`
 
 ## Expected behavior
+
 <!-- What you expected to happen. -->
 
 ## Error message
-```
+
+```text
 Paste the full error message here
 ```
 

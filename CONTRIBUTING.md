@@ -20,7 +20,7 @@ Before writing code, check [existing issues](https://github.com/krishna-goje/qui
 
 ## Branch Strategy
 
-```
+```text
 master (protected)        <-- production releases only, via PR
   └── feature/xxx         <-- all development work happens here
 ```
