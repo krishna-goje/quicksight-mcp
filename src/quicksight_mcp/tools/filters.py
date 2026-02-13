@@ -96,7 +96,7 @@ def register_filter_tools(
         start = time.time()
         client = get_client()
         try:
-            result = client.delete_filter_group(analysis_id, filter_group_id)
+            client.delete_filter_group(analysis_id, filter_group_id)
             get_tracker().record_call(
                 "delete_filter_group",
                 {"analysis_id": analysis_id, "filter_group_id": filter_group_id},

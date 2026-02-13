@@ -8,7 +8,6 @@ These tests focus on components that can be tested independently:
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestExceptions:

@@ -1,7 +1,6 @@
 """Test dataset tools."""
 
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 from fastmcp import FastMCP
 
 

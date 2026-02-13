@@ -1,6 +1,5 @@
 """Test self-learning engine."""
 
-import pytest
 import tempfile
 import os
 

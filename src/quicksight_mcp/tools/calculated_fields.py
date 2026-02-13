@@ -95,7 +95,7 @@ def register_calculated_field_tools(
         start = time.time()
         client = get_client()
         try:
-            result = client.add_calculated_field(
+            client.add_calculated_field(
                 analysis_id, name, expression, dataset_identifier
             )
             get_tracker().record_call(
@@ -154,7 +154,7 @@ def register_calculated_field_tools(
         start = time.time()
         client = get_client()
         try:
-            result = client.update_calculated_field(
+            client.update_calculated_field(
                 analysis_id, name, new_expression
             )
             get_tracker().record_call(
@@ -201,7 +201,7 @@ def register_calculated_field_tools(
         start = time.time()
         client = get_client()
         try:
-            result = client.delete_calculated_field(analysis_id, name)
+            client.delete_calculated_field(analysis_id, name)
             get_tracker().record_call(
                 "delete_calculated_field",
                 {"analysis_id": analysis_id, "name": name},

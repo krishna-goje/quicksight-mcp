@@ -134,7 +134,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
         start = time.time()
         client = get_client()
         try:
-            result = client.delete_visual(analysis_id, visual_id)
+            client.delete_visual(analysis_id, visual_id)
             get_tracker().record_call(
                 "delete_visual",
                 {"analysis_id": analysis_id, "visual_id": visual_id},
@@ -172,7 +172,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
         start = time.time()
         client = get_client()
         try:
-            result = client.set_visual_title(analysis_id, visual_id, title)
+            client.set_visual_title(analysis_id, visual_id, title)
             get_tracker().record_call(
                 "set_visual_title",
                 {"analysis_id": analysis_id, "visual_id": visual_id, "title": title},
@@ -226,7 +226,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
         start = time.time()
         client = get_client()
         try:
-            result = client.set_visual_layout(
+            client.set_visual_layout(
                 analysis_id, visual_id,
                 column_index=column_index,
                 column_span=column_span,
