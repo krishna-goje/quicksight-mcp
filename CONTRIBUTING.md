@@ -72,8 +72,8 @@ ruff check src/ tests/
 # Run tests
 pytest
 
-# Quick import + tool count check
-python -c "from quicksight_mcp.server import mcp; print(f'Tools: {len(mcp._tool_manager._tools)}')"
+# Verify server loads without errors
+python -c "from quicksight_mcp.server import mcp; print('Server OK')"
 ```
 
 ### 5. Commit
