@@ -230,3 +230,53 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
                 str(e),
             )
             return {"error": str(e)}
+
+    @mcp.tool
+    def delete_empty_sheets(analysis_id: str, name_contains: str = "") -> dict:
+        """Delete all empty sheets (0 visuals) from an analysis.
+
+        Use this to clean up orphan sheets left by failed operations.
+        Automatically removes filter groups scoped to deleted sheets.
+
+        WARNING: This is destructive. A backup is automatically created.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            name_contains: If set, only delete empty sheets whose name
+                contains this text (case-insensitive). Leave empty to
+                delete ALL empty sheets.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.delete_empty_sheets(
+                analysis_id,
+                name_contains=name_contains or None,
+            )
+            get_tracker().record_call(
+                "delete_empty_sheets",
+                {"analysis_id": analysis_id, "name_contains": name_contains},
+                (time.time() - start) * 1000,
+                True,
+            )
+            if not result['deleted_sheets']:
+                return {
+                    "status": "no_change",
+                    "analysis_id": analysis_id,
+                    "note": "No empty sheets found matching criteria.",
+                }
+            return {
+                "status": "success",
+                "analysis_id": analysis_id,
+                **result,
+                "note": f"Deleted {len(result['deleted_sheets'])} empty sheets.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "delete_empty_sheets",
+                {"analysis_id": analysis_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
