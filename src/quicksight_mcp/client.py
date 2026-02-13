@@ -2156,17 +2156,30 @@ class QuickSightClient:
         fid = field_id or f'{uuid.uuid4().hex[:8]}.{column}'
         col = {'DataSetIdentifier': dataset_identifier, 'ColumnName': column}
 
-        # COUNT and DISTINCT_COUNT work on any column type via CategoricalMeasureField
+        # COUNT and DISTINCT_COUNT: choose field type based on column name pattern
+        # - DateMeasureField for date/datetime columns
+        # - CategoricalMeasureField for string/other columns
         if agg in ('COUNT', 'DISTINCT_COUNT'):
+            count_fn = 'COUNT' if agg == 'COUNT' else 'DISTINCT_COUNT'
+            is_date = QuickSightClient._is_date_column(column)
+
+            if is_date:
+                return {
+                    'DateMeasureField': {
+                        'FieldId': fid,
+                        'Column': col,
+                        'AggregationFunction': count_fn,
+                    }
+                }
             return {
                 'CategoricalMeasureField': {
                     'FieldId': fid,
                     'Column': col,
-                    'AggregationFunction': 'COUNT' if agg == 'COUNT' else 'DISTINCT_COUNT',
+                    'AggregationFunction': count_fn,
                 }
             }
 
-        # Numeric aggregations require NumericalMeasureField
+        # Numeric aggregations (SUM, AVG, etc.) require SimpleNumericalAggregation
         return {
             'NumericalMeasureField': {
                 'FieldId': fid,
@@ -2177,14 +2190,31 @@ class QuickSightClient:
             }
         }
 
+    _DATE_SUFFIXES = ('_AT', '_DATE', '_TIME', '_TIMESTAMP', '_ON', '_DT')
+    _DATE_EXACT = ('CREATED', 'UPDATED', 'DELETED')
+
+    @staticmethod
+    def _is_date_column(column: str) -> bool:
+        """Detect date/datetime columns by naming convention."""
+        col_upper = column.upper()
+        return (
+            any(col_upper.endswith(s) for s in QuickSightClient._DATE_SUFFIXES)
+            or col_upper in QuickSightClient._DATE_EXACT
+        )
+
     @staticmethod
     def _make_dimension_field(
         column: str, dataset_identifier: str,
-        field_id: Optional[str] = None, is_date: bool = False,
+        field_id: Optional[str] = None, is_date: Optional[bool] = None,
         date_granularity: str = 'DAY',
     ) -> Dict:
-        """Construct a CategoricalDimensionField or DateDimensionField."""
+        """Construct a CategoricalDimensionField or DateDimensionField.
+
+        Auto-detects date columns by naming convention if ``is_date`` is None.
+        """
         fid = field_id or f'{uuid.uuid4().hex[:8]}.{column}'
+        if is_date is None:
+            is_date = QuickSightClient._is_date_column(column)
         if is_date:
             return {
                 'DateDimensionField': {
