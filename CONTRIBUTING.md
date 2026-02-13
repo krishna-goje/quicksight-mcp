@@ -2,19 +2,34 @@
 
 Thank you for your interest in contributing! This document outlines the development workflow and best practices.
 
+## Reporting Issues
+
+Before writing code, check [existing issues](https://github.com/krishna-goje/quicksight-mcp/issues) first.
+
+- **Bugs**: Include the error message, Python version, and the tool/method called
+- **Features**: Describe the use case and expected behavior
+- **Questions**: Open a discussion or issue with the `question` label
+
+## Prerequisites
+
+- Python 3.10 or higher
+- AWS credentials configured (for running the server locally)
+- `gh` CLI recommended for PR workflows
+
 ## Branch Strategy
 
 ```
-main (protected)          ← production releases only, via PR
-  └── feature/xxx         ← all development work happens here
+master (protected)        <-- production releases only, via PR
+  └── feature/xxx         <-- all development work happens here
 ```
 
 ### Rules
 
-- **Never push directly to `main`** -- all changes go through pull requests
-- **Feature branches** are created from `main` and merged back via PR
+- **Never push directly to `master`** -- all changes go through pull requests
+- **Feature branches** are created from `master` and merged back via PR
 - **Branch naming**: `feature/<description>`, `fix/<description>`, `docs/<description>`
-- **Squash merge** PRs to keep `main` history clean
+- **Squash merge** PRs to keep `master` history clean
+- **CI must pass** before merge (lint + tests run automatically on every PR)
 
 ## Development Workflow
 
@@ -31,8 +46,8 @@ pip install -e ".[dev]"
 ### 2. Create a Feature Branch
 
 ```bash
-git checkout main
-git pull origin main
+git checkout master
+git pull origin master
 git checkout -b feature/add-combo-chart-builder
 ```
 
@@ -49,17 +64,14 @@ Follow these patterns:
 ### 4. Test
 
 ```bash
-# Syntax check
-python -c "import ast; ast.parse(open('src/quicksight_mcp/client.py').read())"
+# Lint (must pass before PR)
+ruff check src/ tests/
 
 # Run tests
 pytest
 
-# Verify tool count
-python -c "
-from quicksight_mcp.server import mcp
-print(f'Tools: {len(mcp._tool_manager._tools)}')
-"
+# Quick import + tool count check
+python -c "from quicksight_mcp.server import mcp; print(f'Tools: {len(mcp._tool_manager._tools)}')"
 ```
 
 ### 5. Commit
@@ -71,13 +83,13 @@ git commit -m "Add combo chart builder with field configuration
 - Accepts simple params: category, bar_values, line_values
 - Auto-generates visual ID and layout element
 - Post-write verification included
-- Tested on T&O Homes clone analysis"
+- Tested on clone analysis"
 ```
 
 Commit message guidelines:
 - First line: imperative mood, under 72 chars
 - Body: explain *what* and *why*, not *how*
-- Reference issue numbers if applicable
+- Reference issue numbers if applicable (e.g., `Fixes #12`)
 
 ### 6. Push and Create PR
 
@@ -88,21 +100,39 @@ gh pr create --title "Add combo chart builder" --body "## Summary
 - Accepts simple parameters for bar + line values
 
 ## Test plan
-- [ ] Syntax verification passes
+- [ ] Lint passes (ruff check)
+- [ ] pytest passes
 - [ ] Tool registers correctly (count increased)
 - [ ] create_combo_chart works on test analysis
 - [ ] verify_analysis_health passes after creation
 - [ ] diff_analysis shows the new visual"
 ```
 
-### 7. PR Review Checklist
+### 7. Handling Common Issues
+
+**Tests fail locally**: Fix before pushing. Do not open a PR with failing tests.
+
+**PR has merge conflicts**: Rebase onto the latest master:
+```bash
+git fetch origin
+git rebase origin/master
+# Resolve conflicts, then:
+git push --force-with-lease
+```
+
+**Reviewer requests changes**: Push additional commits to the same branch. The PR updates automatically. Do not force-push after review has started unless asked.
+
+**CI fails after push**: Check the Actions tab on GitHub. Fix the issue locally and push a new commit.
+
+### 8. PR Review Checklist
 
 Before merging, verify:
 
+- [ ] CI passes (lint + tests)
 - [ ] All new write methods have post-write verification
 - [ ] All new write methods have `backup_first=True` default
 - [ ] MCP tools follow the `start-time / try-except / tracker` pattern
-- [ ] No hardcoded AWS account IDs or credentials
+- [ ] No secrets: AWS keys, account IDs, session tokens, or production resource IDs
 - [ ] CHANGELOG.md updated
 - [ ] README.md updated if new tools added
 - [ ] Tool count in README matches actual count
@@ -154,6 +184,9 @@ Every write operation MUST:
 1. Update version in `pyproject.toml`
 2. Update `CHANGELOG.md` with new version section
 3. Create PR: `release/v0.x.0`
-4. After merge, tag: `git tag -a v0.x.0 -m "v0.x.0: <summary>"`
-5. Push tag: `git push origin v0.x.0`
-6. Build and publish: `python -m build && twine upload dist/*`
+4. After merge, tag and push:
+   ```bash
+   git tag -a v0.x.0 -m "v0.x.0: <summary>"
+   git push origin v0.x.0
+   ```
+5. GitHub Actions automatically builds and publishes to PyPI (see `.github/workflows/publish.yml`)

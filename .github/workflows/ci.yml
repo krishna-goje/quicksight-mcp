@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src/ tests/
+
+      - name: Run tests
+        run: pytest --tb=short
+
+      - name: Verify tool registration
+        run: |
+          python -c "
+          from quicksight_mcp.server import mcp
+          count = len(mcp._tool_manager._tools)
+          print(f'Registered tools: {count}')
+          assert count >= 55, f'Expected >= 55 tools, got {count}'
+          "
