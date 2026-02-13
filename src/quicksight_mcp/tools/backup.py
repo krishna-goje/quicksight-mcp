@@ -139,8 +139,11 @@ def register_backup_tools(
             return {
                 "status": "restored",
                 "backup_file": backup_file,
-                "analysis_id": result.get("AnalysisId", analysis_id),
-                "note": "Analysis restored from backup.",
+                "analysis_id": result.get("analysis_id", analysis_id),
+                "note": (
+                    "Analysis restored from backup. Works even on FAILED analyses. "
+                    "Use describe_analysis to verify the structure."
+                ),
             }
         except Exception as e:
             get_tracker().record_call(

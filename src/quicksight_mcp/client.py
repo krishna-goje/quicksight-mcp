@@ -1293,31 +1293,26 @@ class QuickSightClient:
     ) -> Dict:
         """Restore an analysis from a backup JSON file.
 
-        A pre-restore backup of the current state is created automatically.
+        This method bypasses the FAILED-status guard because restoring
+        a FAILED analysis is the primary use case. A pre-restore backup
+        is created when possible (may fail if analysis is in FAILED state).
 
         Args:
             backup_file: Path to the backup JSON file.
             analysis_id: Target analysis ID (uses the ID from the backup if omitted).
 
         Returns:
-            Update response dict.
+            dict with ``status``, ``analysis_id``.
         """
+        # Delegate to restore_from_backup which handles FAILED state
         with open(backup_file, 'r') as f:
             backup_data = json.load(f)
-
-        # Support both casing variants
-        definition = backup_data.get('Definition', backup_data.get('definition'))
-        if not definition:
-            raise ValueError("Backup file does not contain a 'definition' key")
 
         target_id = analysis_id or backup_data.get('analysis', {}).get('AnalysisId')
         if not target_id:
             raise ValueError("No analysis ID provided and none found in backup")
 
-        # Pre-restore safety backup
-        self.backup_analysis(target_id)
-
-        return self.update_analysis(target_id, definition, backup_first=False)
+        return self.restore_from_backup(backup_file, target_id)
 
     def restore_dataset_from_backup(
         self, backup_file: str, dataset_id: Optional[str] = None,
