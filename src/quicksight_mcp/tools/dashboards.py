@@ -169,7 +169,7 @@ def register_dashboard_tools(
         start = time.time()
         client = get_client()
         try:
-            result = client.publish_dashboard(
+            client.publish_dashboard(
                 dashboard_id,
                 source_analysis_id,
                 version_description=version_description or None,
@@ -225,7 +225,7 @@ def register_dashboard_tools(
         start = time.time()
         client = get_client()
         try:
-            result = client.rollback_dashboard(dashboard_id, version_number)
+            client.rollback_dashboard(dashboard_id, version_number)
             get_tracker().record_call(
                 "rollback_dashboard",
                 {

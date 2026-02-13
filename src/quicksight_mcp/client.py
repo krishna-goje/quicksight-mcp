@@ -1010,7 +1010,7 @@ class QuickSightClient:
         total_visuals = 0
         total_layout_elements = 0
         for s in sheets:
-            sheet_id = s.get('SheetId', '')
+            s.get('SheetId', '')
             sheet_name = s.get('Name', '')
             visuals = s.get('Visuals', [])
             total_visuals += len(visuals)

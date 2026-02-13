@@ -94,7 +94,7 @@ def register_parameter_tools(
         start = time.time()
         client = get_client()
         try:
-            result = client.delete_parameter(analysis_id, parameter_name)
+            client.delete_parameter(analysis_id, parameter_name)
             get_tracker().record_call(
                 "delete_parameter",
                 {"analysis_id": analysis_id, "parameter_name": parameter_name},

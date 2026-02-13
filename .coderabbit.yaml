@@ -1,0 +1,52 @@
+# CodeRabbit configuration
+# Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+
+language: en-US
+
+reviews:
+  # Auto-review every PR
+  auto_review:
+    enabled: true
+    drafts: false
+
+  # Review profile: assertive catches more issues
+  profile: assertive
+
+  # What to include in reviews
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  path_instructions:
+    - path: "src/quicksight_mcp/client.py"
+      instructions: |
+        This is the core AWS QuickSight API wrapper. Every write method MUST:
+        1. Call get_analysis_definition_with_version() for optimistic locking
+        2. Call update_analysis() with backup_first=True
+        3. Call a _verify_*() method after success
+        4. Return a structured dict
+        Check for: missing verification, missing backup, hardcoded AWS IDs.
+
+    - path: "src/quicksight_mcp/tools/*.py"
+      instructions: |
+        MCP tool wrappers. Every tool MUST follow this pattern:
+        - start = time.time()
+        - try/except with get_tracker().record_call()
+        - Return structured dict with status or error
+        Check for: missing tracker calls, inconsistent return formats.
+
+    - path: "**/*.py"
+      instructions: |
+        General Python review. Check for:
+        - No hardcoded AWS credentials, account IDs, or resource IDs
+        - No print() statements (use logger)
+        - Python 3.10+ compatible syntax
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: auto

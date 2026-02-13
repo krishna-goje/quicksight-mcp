@@ -73,7 +73,7 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
         start = time.time()
         client = get_client()
         try:
-            result = client.delete_sheet(analysis_id, sheet_id)
+            client.delete_sheet(analysis_id, sheet_id)
             get_tracker().record_call(
                 "delete_sheet",
                 {"analysis_id": analysis_id, "sheet_id": sheet_id},
@@ -111,7 +111,7 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
         start = time.time()
         client = get_client()
         try:
-            result = client.rename_sheet(analysis_id, sheet_id, new_name)
+            client.rename_sheet(analysis_id, sheet_id, new_name)
             get_tracker().record_call(
                 "rename_sheet",
                 {"analysis_id": analysis_id, "sheet_id": sheet_id, "new_name": new_name},
