@@ -1390,6 +1390,133 @@ class QuickSightClient:
             'status': response.get('CreationStatus'),
         }
 
+    def restore_from_backup(
+        self,
+        backup_file: str,
+        analysis_id: str,
+    ) -> Dict:
+        """Restore an analysis from a JSON backup file.
+
+        Reads the backup, creates a pre-restore backup, then updates
+        the analysis with the backed-up definition. This is the
+        recommended way to recover from a FAILED analysis state.
+
+        Args:
+            backup_file: Path to the backup JSON file.
+            analysis_id: Analysis ID to restore.
+
+        Returns:
+            dict with ``status``, ``analysis_id``.
+        """
+        with open(backup_file) as f:
+            backup_data = json.load(f)
+
+        # Handle both Definition (capital) and definition (lower) key casing
+        definition = backup_data.get('Definition', backup_data.get('definition', {}))
+        if not definition:
+            raise ValueError(f"No Definition found in backup file: {backup_file}")
+
+        # Pre-restore backup
+        try:
+            self.backup_analysis(analysis_id)
+        except Exception:
+            logger.warning("Could not create pre-restore backup (analysis may be in FAILED state)")
+
+        # Force update (skip FAILED status check by calling AWS directly)
+        analysis = self.get_analysis(analysis_id)
+        self.client.update_analysis(
+            AwsAccountId=self.account_id,
+            AnalysisId=analysis_id,
+            Name=analysis['Name'],
+            Definition=definition,
+        )
+
+        # Poll for completion
+        start = time.time()
+        while time.time() - start < 60:
+            time.sleep(2)
+            refreshed = self.get_analysis(analysis_id)
+            status = refreshed.get('Status', '')
+            if 'SUCCESSFUL' in status:
+                self.clear_analysis_def_cache(analysis_id)
+                logger.info("Analysis %s restored from %s", analysis_id, backup_file)
+                return {'status': status, 'analysis_id': analysis_id}
+            if 'FAILED' in status:
+                errors = refreshed.get('Errors', [])
+                raise RuntimeError(
+                    f"Restore failed: {[e.get('Message', '') for e in errors]}"
+                )
+        raise RuntimeError("Restore timed out after 60s")
+
+    def delete_empty_sheets(
+        self,
+        analysis_id: str,
+        name_contains: Optional[str] = None,
+        backup_first: bool = True,
+    ) -> Dict:
+        """Delete all empty sheets (0 visuals) from an analysis.
+
+        Optionally filter by name substring. Automatically removes
+        scoped filter groups for deleted sheets.
+
+        Args:
+            analysis_id: Analysis ID.
+            name_contains: If set, only delete empty sheets whose name
+                contains this substring (case-insensitive).
+            backup_first: Back up before writing.
+
+        Returns:
+            dict with ``deleted_sheets``, ``filter_groups_removed``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        sheets = definition.get('Sheets', [])
+
+        to_delete = set()
+        for s in sheets:
+            if len(s.get('Visuals', [])) == 0:
+                if name_contains is None or name_contains.lower() in s.get('Name', '').lower():
+                    to_delete.add(s['SheetId'])
+
+        if not to_delete:
+            return {'deleted_sheets': [], 'filter_groups_removed': 0}
+
+        definition['Sheets'] = [s for s in sheets if s['SheetId'] not in to_delete]
+
+        # Remove filter groups scoped to deleted sheets
+        fg_before = len(definition.get('FilterGroups', []))
+        definition['FilterGroups'] = [
+            fg for fg in definition.get('FilterGroups', [])
+            if not any(
+                scope.get('SheetId') in to_delete
+                for scope in (
+                    fg.get('ScopeConfiguration', {})
+                    .get('SelectedSheets', {})
+                    .get('SheetVisualScopingConfigurations', [])
+                )
+            )
+        ]
+        fg_removed = fg_before - len(definition.get('FilterGroups', []))
+
+        self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        deleted_names = [
+            s.get('Name') for s in sheets if s['SheetId'] in to_delete
+        ]
+        logger.info(
+            "Deleted %d empty sheets from %s: %s",
+            len(to_delete), analysis_id, deleted_names,
+        )
+        return {
+            'deleted_sheets': deleted_names,
+            'filter_groups_removed': fg_removed,
+            'sheet_count_after': len(definition['Sheets']),
+        }
+
     def _get_analysis_permissions(self, analysis_id: str) -> List[Dict]:
         """Retrieve current permissions for an analysis."""
         try:
@@ -1495,6 +1622,10 @@ class QuickSightClient:
     ) -> Dict:
         """Delete a sheet from an analysis.
 
+        Automatically removes filter groups scoped to the sheet, since
+        QuickSight rejects updates where a filter group references a
+        deleted sheet.
+
         Raises:
             ValueError: If the sheet is not found.
         """
@@ -1505,6 +1636,23 @@ class QuickSightClient:
         definition['Sheets'] = [s for s in sheets if s.get('SheetId') != sheet_id]
         if len(definition['Sheets']) == original_count:
             raise ValueError(f"Sheet '{sheet_id}' not found")
+
+        # Remove filter groups scoped to this sheet
+        fg_before = len(definition.get('FilterGroups', []))
+        definition['FilterGroups'] = [
+            fg for fg in definition.get('FilterGroups', [])
+            if not any(
+                scope.get('SheetId') == sheet_id
+                for scope in (
+                    fg.get('ScopeConfiguration', {})
+                    .get('SelectedSheets', {})
+                    .get('SheetVisualScopingConfigurations', [])
+                )
+            )
+        ]
+        fg_removed = fg_before - len(definition.get('FilterGroups', []))
+        if fg_removed:
+            logger.info("Removed %d filter groups scoped to sheet %s", fg_removed, sheet_id)
 
         result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,
