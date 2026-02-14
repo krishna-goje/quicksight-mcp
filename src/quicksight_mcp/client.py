@@ -143,7 +143,9 @@ class QuickSightClient:
         else:
             self.session = boto3.Session(region_name=self.region)
 
-        self.client = self.session.client('quicksight')
+        from botocore.config import Config
+        retry_config = Config(retries={'max_attempts': 3, 'mode': 'adaptive'})
+        self.client = self.session.client('quicksight', config=retry_config)
 
         # Auto-detect account ID from STS if not provided
         self.account_id = self._account_id_override
@@ -452,7 +454,8 @@ class QuickSightClient:
 
         # Preserve optional top-level keys
         for key in ('ColumnGroups', 'FieldFolders', 'RowLevelPermissionDataSet',
-                     'DataSetUsageConfiguration'):
+                     'DataSetUsageConfiguration', 'ColumnLevelPermissionRules',
+                     'RowLevelPermissionTagConfiguration'):
             if key in dataset:
                 update_params[key] = dataset[key]
 
@@ -756,6 +759,9 @@ class QuickSightClient:
         # Destructive-change guard
         if not allow_destructive:
             self._validate_definition_not_destructive(analysis_id, definition)
+
+        # Clear cache BEFORE update so crash leaves no stale data
+        self.clear_analysis_def_cache(analysis_id)
 
         response = self._call(
             'update_analysis',
@@ -1460,14 +1466,14 @@ class QuickSightClient:
             Path to the backup file.
         """
         bdir = backup_dir or self._backup_dir()
-        Path(bdir).mkdir(parents=True, exist_ok=True)
+        Path(bdir).mkdir(parents=True, exist_ok=True, mode=0o700)
 
         dataset = self.get_dataset(dataset_id)
         name = dataset.get('Name', dataset_id).replace(' ', '_').replace('/', '_')
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{bdir}/dataset_{name}_{ts}.json"
 
-        with open(filename, 'w') as f:
+        with open(os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
             json.dump(dataset, f, indent=2, default=str)
 
         logger.info("Backed up dataset to: %s", filename)
@@ -1482,7 +1488,7 @@ class QuickSightClient:
             Path to the backup file.
         """
         bdir = backup_dir or self._backup_dir()
-        Path(bdir).mkdir(parents=True, exist_ok=True)
+        Path(bdir).mkdir(parents=True, exist_ok=True, mode=0o700)
 
         analysis = self.get_analysis(analysis_id)
         definition = self.get_analysis_definition(analysis_id)
@@ -1496,7 +1502,7 @@ class QuickSightClient:
             'definition': definition,
         }
 
-        with open(filename, 'w') as f:
+        with open(os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
             json.dump(backup_data, f, indent=2, default=str)
 
         logger.info("Backed up analysis to: %s", filename)
@@ -1617,7 +1623,24 @@ class QuickSightClient:
 
         Returns:
             dict with ``status``, ``analysis_id``.
+
+        Raises:
+            ValueError: If the backup file is outside the backup directory
+                or does not contain a valid definition.
         """
+        # Path traversal protection
+        allowed_dirs = [
+            os.path.realpath(self._backup_dir()),
+            os.path.realpath(str(Path(self._backup_dir()).parent / 'snapshots')),
+            '/tmp/qs_backup',  # Legacy backup location
+        ]
+        real_path = os.path.realpath(backup_file)
+        if not any(real_path.startswith(d) for d in allowed_dirs):
+            raise ValueError(
+                f"Backup file must be within the backup directory. "
+                f"Got: {backup_file}"
+            )
+
         with open(backup_file) as f:
             backup_data = json.load(f)
 
