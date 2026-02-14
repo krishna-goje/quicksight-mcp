@@ -392,7 +392,9 @@ class QuickSightClient:
 
     def get_dataset(self, dataset_id: str) -> Dict:
         """Get full dataset definition."""
-        response = self.client.describe_data_set(
+        self._ensure_account_id()
+        response = self._call(
+            'describe_data_set',
             AwsAccountId=self.account_id,
             DataSetId=dataset_id,
         )
@@ -483,7 +485,8 @@ class QuickSightClient:
             dict with ``ingestion_id``, ``status``, ``arn``.
         """
         ingestion_id = f"refresh-{datetime.now():%Y%m%d-%H%M%S}"
-        response = self.client.create_ingestion(
+        response = self._call(
+            'create_ingestion',
             AwsAccountId=self.account_id,
             DataSetId=dataset_id,
             IngestionId=ingestion_id,
@@ -496,7 +499,8 @@ class QuickSightClient:
 
     def get_refresh_status(self, dataset_id: str, ingestion_id: str) -> Dict:
         """Get status of a SPICE refresh."""
-        response = self.client.describe_ingestion(
+        response = self._call(
+            'describe_ingestion',
             AwsAccountId=self.account_id,
             DataSetId=dataset_id,
             IngestionId=ingestion_id,
@@ -511,7 +515,8 @@ class QuickSightClient:
 
     def list_recent_refreshes(self, dataset_id: str, limit: int = 5) -> List[Dict]:
         """List recent SPICE refreshes for a dataset, newest first."""
-        response = self.client.list_ingestions(
+        response = self._call(
+            'list_ingestions',
             AwsAccountId=self.account_id,
             DataSetId=dataset_id,
         )
@@ -1300,7 +1305,8 @@ class QuickSightClient:
 
     def get_dashboard(self, dashboard_id: str) -> Dict:
         """Get dashboard details (describe_dashboard)."""
-        response = self.client.describe_dashboard(
+        response = self._call(
+            'describe_dashboard',
             AwsAccountId=self.account_id,
             DashboardId=dashboard_id,
         )
@@ -1308,7 +1314,8 @@ class QuickSightClient:
 
     def get_dashboard_versions(self, dashboard_id: str, limit: int = 10) -> List[Dict]:
         """Get dashboard version history, newest first."""
-        response = self.client.list_dashboard_versions(
+        response = self._call(
+            'list_dashboard_versions',
             AwsAccountId=self.account_id,
             DashboardId=dashboard_id,
         )
@@ -1329,7 +1336,8 @@ class QuickSightClient:
 
     def get_dashboard_definition(self, dashboard_id: str) -> Dict:
         """Get full dashboard definition (describe_dashboard_definition)."""
-        response = self.client.describe_dashboard_definition(
+        response = self._call(
+            'describe_dashboard_definition',
             AwsAccountId=self.account_id,
             DashboardId=dashboard_id,
         )
@@ -1354,7 +1362,8 @@ class QuickSightClient:
         dashboard = self.get_dashboard(dashboard_id)
         analysis = self.get_analysis(source_analysis_id)
 
-        response = self.client.update_dashboard(
+        response = self._call(
+            'update_dashboard',
             AwsAccountId=self.account_id,
             DashboardId=dashboard_id,
             Name=dashboard['Name'],
@@ -1369,9 +1378,32 @@ class QuickSightClient:
             ),
         )
 
+        # Extract the new version number and publish it
+        # update_dashboard creates a DRAFT — must call update_dashboard_published_version
+        # to make it live for viewers
+        version_arn = response.get('VersionArn', '')
+        new_version = None
+        if version_arn:
+            # VersionArn format: .../dashboard/<id>/version/<number>
+            parts = version_arn.rsplit('/', 1)
+            if len(parts) == 2 and parts[-1].isdigit():
+                new_version = int(parts[-1])
+
+        if new_version:
+            self._call(
+                'update_dashboard_published_version',
+                AwsAccountId=self.account_id,
+                DashboardId=dashboard_id,
+                VersionNumber=new_version,
+            )
+            logger.info(
+                "Dashboard %s published version %d", dashboard_id, new_version,
+            )
+
         return {
             'dashboard_id': dashboard_id,
-            'version_arn': response.get('VersionArn'),
+            'version_arn': version_arn,
+            'version_number': new_version,
             'status': response.get('CreationStatus'),
         }
 
@@ -1551,7 +1583,8 @@ class QuickSightClient:
         # Copy permissions from source
         permissions = self._get_analysis_permissions(source_analysis_id)
 
-        response = self.client.create_analysis(
+        response = self._call(
+            'create_analysis',
             AwsAccountId=self.account_id,
             AnalysisId=new_id,
             Name=new_name,
@@ -1659,18 +1692,26 @@ class QuickSightClient:
 
         definition['Sheets'] = [s for s in sheets if s['SheetId'] not in to_delete]
 
-        # Remove filter groups scoped to deleted sheets
+        # Remove scoping entries for deleted sheets from filter groups
+        for fg in definition.get('FilterGroups', []):
+            scopes = (
+                fg.get('ScopeConfiguration', {})
+                .get('SelectedSheets', {})
+                .get('SheetVisualScopingConfigurations', [])
+            )
+            filtered = [s for s in scopes if s.get('SheetId') not in to_delete]
+            if len(filtered) < len(scopes):
+                fg['ScopeConfiguration']['SelectedSheets']['SheetVisualScopingConfigurations'] = filtered
+        # Remove filter groups with empty scoping
         fg_before = len(definition.get('FilterGroups', []))
         definition['FilterGroups'] = [
             fg for fg in definition.get('FilterGroups', [])
-            if not any(
-                scope.get('SheetId') in to_delete
-                for scope in (
-                    fg.get('ScopeConfiguration', {})
-                    .get('SelectedSheets', {})
-                    .get('SheetVisualScopingConfigurations', [])
-                )
-            )
+            if len(
+                fg.get('ScopeConfiguration', {})
+                .get('SelectedSheets', {})
+                .get('SheetVisualScopingConfigurations', [])
+            ) > 0
+            or 'AllSheets' in fg.get('ScopeConfiguration', {})
         ]
         fg_removed = fg_before - len(definition.get('FilterGroups', []))
 
@@ -1697,7 +1738,8 @@ class QuickSightClient:
     def _get_analysis_permissions(self, analysis_id: str) -> List[Dict]:
         """Retrieve current permissions for an analysis."""
         try:
-            response = self.client.describe_analysis_permissions(
+            response = self._call(
+            'describe_analysis_permissions',
                 AwsAccountId=self.account_id,
                 AnalysisId=analysis_id,
             )
@@ -1814,22 +1856,32 @@ class QuickSightClient:
         if len(definition['Sheets']) == original_count:
             raise ValueError(f"Sheet '{sheet_id}' not found")
 
-        # Remove filter groups scoped to this sheet
+        # Remove scoping entries for this sheet from filter groups
+        # Only remove the entire filter group if it has zero remaining scopes
+        fg_removed = 0
+        for fg in definition.get('FilterGroups', []):
+            scopes = (
+                fg.get('ScopeConfiguration', {})
+                .get('SelectedSheets', {})
+                .get('SheetVisualScopingConfigurations', [])
+            )
+            filtered = [s for s in scopes if s.get('SheetId') != sheet_id]
+            if len(filtered) < len(scopes):
+                fg['ScopeConfiguration']['SelectedSheets']['SheetVisualScopingConfigurations'] = filtered
+        # Remove filter groups with empty scoping
         fg_before = len(definition.get('FilterGroups', []))
         definition['FilterGroups'] = [
             fg for fg in definition.get('FilterGroups', [])
-            if not any(
-                scope.get('SheetId') == sheet_id
-                for scope in (
-                    fg.get('ScopeConfiguration', {})
-                    .get('SelectedSheets', {})
-                    .get('SheetVisualScopingConfigurations', [])
-                )
-            )
+            if len(
+                fg.get('ScopeConfiguration', {})
+                .get('SelectedSheets', {})
+                .get('SheetVisualScopingConfigurations', [])
+            ) > 0
+            or 'AllSheets' in fg.get('ScopeConfiguration', {})
         ]
         fg_removed = fg_before - len(definition.get('FilterGroups', []))
         if fg_removed:
-            logger.info("Removed %d filter groups scoped to sheet %s", fg_removed, sheet_id)
+            logger.info("Removed %d filter groups with no remaining scope after sheet %s deletion", fg_removed, sheet_id)
 
         result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,
