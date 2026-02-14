@@ -161,25 +161,113 @@ class QuickSightClient:
 
         logger.info("AWS session initialized (account=%s)", self.account_id or 'pending')
 
+    def _reauthenticate(self) -> bool:
+        """Re-authenticate using saml2aws when credentials have expired.
+
+        Runs ``saml2aws login`` with the same parameters as qs_utils.py.
+        This is the automatic recovery path — no user intervention needed
+        as long as saml2aws has cached browser cookies from a prior login.
+
+        Falls back to environment-variable-based auth config if saml2aws
+        is not available.
+
+        Returns True if re-authentication succeeded.
+        """
+        import subprocess
+
+        profile = self.profile or 'default'
+
+        # Try saml2aws first (matches qs_utils.py pattern)
+        saml_role = os.environ.get('QUICKSIGHT_SAML_ROLE', '')
+        cmd = [
+            'saml2aws', 'login',
+            '--skip-prompt',
+            '--profile', profile,
+            '--force',
+            '--session-duration', '43200',
+        ]
+        if saml_role:
+            cmd.extend(['--role', saml_role])
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                logger.info("saml2aws re-authentication successful")
+                return True
+            logger.warning("saml2aws failed: %s", result.stderr.strip()[:200])
+        except FileNotFoundError:
+            logger.info("saml2aws not found, skipping automatic re-auth")
+        except subprocess.TimeoutExpired:
+            logger.warning("saml2aws timed out after 60s")
+        except Exception as e:
+            logger.warning("saml2aws error: %s", e)
+
+        return False
+
     def _refresh_on_expired(self, error: Exception) -> bool:
         """If the error is an ExpiredToken, refresh credentials and return True.
+
+        Two-phase recovery:
+        1. Try creating a new boto3 session (picks up refreshed ~/.aws/credentials)
+        2. If that still fails, run saml2aws login to get fresh credentials
 
         Returns False if the error is not credential-related.
         """
         err_str = str(error)
-        if 'ExpiredToken' in err_str or 'expired' in err_str.lower():
-            logger.warning("AWS credentials expired, refreshing session...")
+        if 'ExpiredToken' not in err_str and 'expired' not in err_str.lower():
+            return False
+
+        logger.warning("AWS credentials expired, attempting recovery...")
+
+        # Phase 1: Try new session (maybe creds were refreshed by another process)
+        try:
+            self._init_aws_session()
+            if self.account_id:
+                logger.info("Session refresh successful (account=%s)", self.account_id)
+                return True
+            # account_id is None means STS still failed — creds still expired
+        except Exception:
+            pass
+
+        # Phase 2: Run saml2aws to get fresh credentials
+        logger.info("Session refresh insufficient, running saml2aws...")
+        if self._reauthenticate():
             try:
                 self._init_aws_session()
-                # Resolve account_id if it was deferred from init
                 if not self.account_id:
                     sts = self.session.client('sts')
                     self.account_id = sts.get_caller_identity()['Account']
-                    logger.info("Account ID resolved after refresh: %s", self.account_id)
+                logger.info("Recovery complete (account=%s)", self.account_id)
                 return True
-            except Exception as refresh_err:
-                logger.error("Failed to refresh AWS session: %s", refresh_err)
+            except Exception as e:
+                logger.error("Failed after saml2aws: %s", e)
+
+        logger.error(
+            "Could not refresh credentials. Run 'saml2aws login' manually "
+            "or set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY environment variables."
+        )
         return False
+
+    def _ensure_account_id(self) -> str:
+        """Ensure account_id is resolved. Triggers reauth if needed."""
+        if self.account_id:
+            return self.account_id
+        # Try to resolve
+        try:
+            sts = self.session.client('sts')
+            self.account_id = sts.get_caller_identity()['Account']
+            return self.account_id
+        except Exception as e:
+            # Trigger full reauth
+            if self._refresh_on_expired(e):
+                return self.account_id
+            raise RuntimeError(
+                "Cannot resolve AWS account ID. Credentials are expired. "
+                "Run: saml2aws login or refresh your AWS credentials."
+            ) from e
 
     def _call(self, method_name: str, **kwargs) -> Any:
         """Call a QuickSight API method with auto-retry on expired credentials.
@@ -190,7 +278,9 @@ class QuickSightClient:
             return getattr(self.client, method_name)(**kwargs)
         except Exception as e:
             if self._refresh_on_expired(e):
-                # Retry with refreshed client
+                # Retry with refreshed client — update AwsAccountId if it was stale
+                if 'AwsAccountId' in kwargs:
+                    kwargs['AwsAccountId'] = self.account_id
                 return getattr(self.client, method_name)(**kwargs)
             raise
 
@@ -249,6 +339,7 @@ class QuickSightClient:
             use_cache: Use the 5-minute cache (default ``True``).
         """
         global _dataset_cache
+        self._ensure_account_id()
 
         if use_cache and _dataset_cache['data'] is not None:
             if time.time() - _dataset_cache['timestamp'] < _dataset_cache['ttl']:
@@ -441,6 +532,7 @@ class QuickSightClient:
     def list_analyses(self, max_results: int = 100, use_cache: bool = True) -> List[Dict]:
         """List all analyses with TTL-based caching."""
         global _analysis_cache
+        self._ensure_account_id()
 
         if use_cache and _analysis_cache['data'] is not None:
             if time.time() - _analysis_cache['timestamp'] < _analysis_cache['ttl']:
@@ -473,6 +565,7 @@ class QuickSightClient:
 
     def get_analysis(self, analysis_id: str) -> Dict:
         """Get analysis summary (describe_analysis)."""
+        self._ensure_account_id()
         response = self._call(
             'describe_analysis',
             AwsAccountId=self.account_id,
@@ -1174,6 +1267,7 @@ class QuickSightClient:
     def list_dashboards(self, max_results: int = 100, use_cache: bool = True) -> List[Dict]:
         """List all dashboards with TTL-based caching."""
         global _dashboard_cache
+        self._ensure_account_id()
 
         if use_cache and _dashboard_cache['data'] is not None:
             if time.time() - _dashboard_cache['timestamp'] < _dashboard_cache['ttl']:
