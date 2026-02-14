@@ -106,20 +106,10 @@ class QuickSightClient:
     ):
         self.profile = profile or os.environ.get('AWS_PROFILE')
         self.region = region or os.environ.get('AWS_REGION', 'us-east-1')
+        self._account_id_override = account_id or os.environ.get('AWS_ACCOUNT_ID')
 
-        # Create session - use profile if given, else default credential chain
-        if self.profile:
-            self.session = boto3.Session(profile_name=self.profile, region_name=self.region)
-        else:
-            self.session = boto3.Session(region_name=self.region)
-
-        self.client = self.session.client('quicksight')
-
-        # Auto-detect account ID from STS if not provided
-        self.account_id = account_id or os.environ.get('AWS_ACCOUNT_ID')
-        if not self.account_id:
-            sts = self.session.client('sts')
-            self.account_id = sts.get_caller_identity()['Account']
+        # Create session + client (will be auto-refreshed on ExpiredToken)
+        self._init_aws_session()
 
         # Instance-level defaults
         self._verify_default = (
@@ -135,6 +125,74 @@ class QuickSightClient:
             "QuickSightClient initialized (account=%s, region=%s, profile=%s)",
             self.account_id, self.region, self.profile or 'default-chain',
         )
+
+    def _init_aws_session(self) -> None:
+        """Create or refresh the boto3 session and QuickSight client.
+
+        Called on init and automatically on ExpiredToken errors.
+        Creates a fresh session that reads the latest credentials
+        from ``~/.aws/credentials`` (refreshed by saml2aws).
+
+        The account ID is resolved lazily on first API call if credentials
+        are expired at startup (common with short-lived saml2aws tokens).
+        """
+        if self.profile:
+            self.session = boto3.Session(
+                profile_name=self.profile, region_name=self.region,
+            )
+        else:
+            self.session = boto3.Session(region_name=self.region)
+
+        self.client = self.session.client('quicksight')
+
+        # Auto-detect account ID from STS if not provided
+        self.account_id = self._account_id_override
+        if not self.account_id:
+            try:
+                sts = self.session.client('sts')
+                self.account_id = sts.get_caller_identity()['Account']
+            except Exception:
+                # Credentials may be expired at startup — will resolve on first call
+                logger.warning(
+                    "Could not detect account ID (credentials may be expired). "
+                    "Will retry on first API call after credential refresh."
+                )
+                self.account_id = None
+
+        logger.info("AWS session initialized (account=%s)", self.account_id or 'pending')
+
+    def _refresh_on_expired(self, error: Exception) -> bool:
+        """If the error is an ExpiredToken, refresh credentials and return True.
+
+        Returns False if the error is not credential-related.
+        """
+        err_str = str(error)
+        if 'ExpiredToken' in err_str or 'expired' in err_str.lower():
+            logger.warning("AWS credentials expired, refreshing session...")
+            try:
+                self._init_aws_session()
+                # Resolve account_id if it was deferred from init
+                if not self.account_id:
+                    sts = self.session.client('sts')
+                    self.account_id = sts.get_caller_identity()['Account']
+                    logger.info("Account ID resolved after refresh: %s", self.account_id)
+                return True
+            except Exception as refresh_err:
+                logger.error("Failed to refresh AWS session: %s", refresh_err)
+        return False
+
+    def _call(self, method_name: str, **kwargs) -> Any:
+        """Call a QuickSight API method with auto-retry on expired credentials.
+
+        If the call fails with ExpiredToken, refreshes the session and retries once.
+        """
+        try:
+            return getattr(self.client, method_name)(**kwargs)
+        except Exception as e:
+            if self._refresh_on_expired(e):
+                # Retry with refreshed client
+                return getattr(self.client, method_name)(**kwargs)
+            raise
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -196,10 +254,19 @@ class QuickSightClient:
             if time.time() - _dataset_cache['timestamp'] < _dataset_cache['ttl']:
                 return _dataset_cache['data']
 
-        paginator = self.client.get_paginator('list_data_sets')
-        datasets: List[Dict] = []
-        for page in paginator.paginate(AwsAccountId=self.account_id):
-            datasets.extend(page.get('DataSetSummaries', []))
+        try:
+            paginator = self.client.get_paginator('list_data_sets')
+            datasets: List[Dict] = []
+            for page in paginator.paginate(AwsAccountId=self.account_id):
+                datasets.extend(page.get('DataSetSummaries', []))
+        except Exception as e:
+            if self._refresh_on_expired(e):
+                paginator = self.client.get_paginator('list_data_sets')
+                datasets = []
+                for page in paginator.paginate(AwsAccountId=self.account_id):
+                    datasets.extend(page.get('DataSetSummaries', []))
+            else:
+                raise
 
         _dataset_cache['data'] = datasets
         _dataset_cache['timestamp'] = time.time()
@@ -379,10 +446,19 @@ class QuickSightClient:
             if time.time() - _analysis_cache['timestamp'] < _analysis_cache['ttl']:
                 return _analysis_cache['data']
 
-        paginator = self.client.get_paginator('list_analyses')
-        analyses: List[Dict] = []
-        for page in paginator.paginate(AwsAccountId=self.account_id):
-            analyses.extend(page.get('AnalysisSummaryList', []))
+        try:
+            paginator = self.client.get_paginator('list_analyses')
+            analyses: List[Dict] = []
+            for page in paginator.paginate(AwsAccountId=self.account_id):
+                analyses.extend(page.get('AnalysisSummaryList', []))
+        except Exception as e:
+            if self._refresh_on_expired(e):
+                paginator = self.client.get_paginator('list_analyses')
+                analyses = []
+                for page in paginator.paginate(AwsAccountId=self.account_id):
+                    analyses.extend(page.get('AnalysisSummaryList', []))
+            else:
+                raise
 
         _analysis_cache['data'] = analyses
         _analysis_cache['timestamp'] = time.time()
@@ -397,7 +473,8 @@ class QuickSightClient:
 
     def get_analysis(self, analysis_id: str) -> Dict:
         """Get analysis summary (describe_analysis)."""
-        response = self.client.describe_analysis(
+        response = self._call(
+            'describe_analysis',
             AwsAccountId=self.account_id,
             AnalysisId=analysis_id,
         )
@@ -415,7 +492,8 @@ class QuickSightClient:
             if time.time() - cached['timestamp'] < 300:
                 return cached['data']
 
-        response = self.client.describe_analysis_definition(
+        response = self._call(
+            'describe_analysis_definition',
             AwsAccountId=self.account_id,
             AnalysisId=analysis_id,
         )
@@ -581,7 +659,8 @@ class QuickSightClient:
         if not allow_destructive:
             self._validate_definition_not_destructive(analysis_id, definition)
 
-        response = self.client.update_analysis(
+        response = self._call(
+            'update_analysis',
             AwsAccountId=self.account_id,
             AnalysisId=analysis_id,
             Name=analysis['Name'],
@@ -1100,10 +1179,19 @@ class QuickSightClient:
             if time.time() - _dashboard_cache['timestamp'] < _dashboard_cache['ttl']:
                 return _dashboard_cache['data']
 
-        paginator = self.client.get_paginator('list_dashboards')
-        dashboards: List[Dict] = []
-        for page in paginator.paginate(AwsAccountId=self.account_id):
-            dashboards.extend(page.get('DashboardSummaryList', []))
+        try:
+            paginator = self.client.get_paginator('list_dashboards')
+            dashboards: List[Dict] = []
+            for page in paginator.paginate(AwsAccountId=self.account_id):
+                dashboards.extend(page.get('DashboardSummaryList', []))
+        except Exception as e:
+            if self._refresh_on_expired(e):
+                paginator = self.client.get_paginator('list_dashboards')
+                dashboards = []
+                for page in paginator.paginate(AwsAccountId=self.account_id):
+                    dashboards.extend(page.get('DashboardSummaryList', []))
+            else:
+                raise
 
         _dashboard_cache['data'] = dashboards
         _dashboard_cache['timestamp'] = time.time()
