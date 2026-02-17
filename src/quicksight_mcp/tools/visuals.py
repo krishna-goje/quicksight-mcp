@@ -506,3 +506,111 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
                 (time.time() - start) * 1000, False, str(e),
             )
             return {"error": str(e)}
+
+    @mcp.tool
+    def create_combo_chart(
+        analysis_id: str, sheet_id: str, title: str,
+        category_column: str, bar_column: str, bar_aggregation: str,
+        line_column: str, line_aggregation: str, dataset_identifier: str,
+        bar_format_string: str = "", line_format_string: str = "",
+        show_data_labels: bool = False,
+    ) -> dict:
+        """Create a combo chart (bars + line on same chart) from simple parameters.
+
+        A combo chart overlays bar values and line values sharing a category
+        axis.  For example, count bars with a percentage line overlay.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            sheet_id: The sheet to add the chart to.
+            title: Display title.
+            category_column: Dimension column for the shared X-axis
+                (e.g., "MARKET_NAME" or "WEEK_DATE").
+            bar_column: Measure column rendered as bars (e.g., "FLIP_TOKEN").
+            bar_aggregation: Aggregation for bar values (SUM, COUNT, AVG, etc.).
+            line_column: Measure column rendered as a line (e.g., "CONVERSION_RATE").
+            line_aggregation: Aggregation for line values (SUM, COUNT, AVG, etc.).
+            dataset_identifier: The dataset identifier.
+            bar_format_string: Display format for bar values (e.g., "#,##0").
+                Leave empty for default formatting.
+            line_format_string: Display format for line values (e.g., "0.0%").
+                Leave empty for default formatting.
+            show_data_labels: Show value labels on bars and line points.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.create_combo_chart(
+                analysis_id, sheet_id, title, category_column,
+                bar_column, bar_aggregation,
+                line_column, line_aggregation,
+                dataset_identifier,
+                bar_format_string=bar_format_string or None,
+                line_format_string=line_format_string or None,
+                show_data_labels=show_data_labels,
+            )
+            get_tracker().record_call(
+                "create_combo_chart",
+                {"analysis_id": analysis_id, "title": title},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "visual_id": result.get("visual_id"),
+                "title": title,
+                "note": "Combo chart created. Use set_visual_layout to reposition.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "create_combo_chart", {"analysis_id": analysis_id},
+                (time.time() - start) * 1000, False, str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def create_pie_chart(
+        analysis_id: str, sheet_id: str, title: str,
+        group_column: str, value_column: str, value_aggregation: str,
+        dataset_identifier: str, format_string: str = "",
+    ) -> dict:
+        """Create a pie chart from simple parameters.
+
+        Args:
+            analysis_id: The QuickSight analysis ID.
+            sheet_id: The sheet to add the chart to.
+            title: Display title.
+            group_column: Dimension column for pie slices (e.g., "MARKET_NAME").
+            value_column: Measure column for slice sizes (e.g., "REVENUE").
+            value_aggregation: SUM, COUNT, AVG, MIN, MAX, or DISTINCT_COUNT.
+            dataset_identifier: The dataset identifier.
+            format_string: Display format (e.g., "#,##0", "$#,##0.00", "0.0%").
+                Leave empty for default formatting.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            result = client.create_pie_chart(
+                analysis_id, sheet_id, title,
+                group_column, value_column, value_aggregation,
+                dataset_identifier,
+                format_string=format_string or None,
+            )
+            get_tracker().record_call(
+                "create_pie_chart",
+                {"analysis_id": analysis_id, "title": title},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "visual_id": result.get("visual_id"),
+                "title": title,
+                "note": "Pie chart created. Use set_visual_layout to reposition.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "create_pie_chart", {"analysis_id": analysis_id},
+                (time.time() - start) * 1000, False, str(e),
+            )
+            return {"error": str(e)}
