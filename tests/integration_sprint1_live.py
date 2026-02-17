@@ -6,12 +6,18 @@ Creates a test sheet at start, runs all tests, deletes it at end.
 """
 
 import os
+
+# Live test guard - requires explicit opt-in
+if os.environ.get('QS_LIVE_TESTS') != '1':
+    import pytest
+    pytest.skip('Set QS_LIVE_TESTS=1 to run live API tests', allow_module_level=True)
+
 import sys
 import json
 import time
 
 os.environ['AWS_PROFILE'] = 'od-quicksight-prod'
-sys.path.insert(0, '/Users/krishnagoje/quicksight-mcp/src')
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from quicksight_mcp.client import QuickSightClient
 
