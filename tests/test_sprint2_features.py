@@ -8,6 +8,7 @@ Covers:
 - _paginate: paginated list helper, auto-retry on ExpiredToken
 """
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,8 +26,8 @@ def _make_client() -> QuickSightClient:
         client = QuickSightClient.__new__(QuickSightClient)
         client.profile = None
         client.region = 'us-east-1'
-        client._account_id_override = '123456789012'
-        client.account_id = '123456789012'
+        client._account_id_override = os.environ.get('TEST_ACCOUNT_ID', '123456789012')
+        client.account_id = os.environ.get('TEST_ACCOUNT_ID', '123456789012')
         client._verify_default = False
         client._locking_default = False
         return client
@@ -347,7 +348,7 @@ class TestCancelRefresh:
 
         self.client._call.assert_called_once_with(
             'cancel_ingestion',
-            AwsAccountId='123456789012',
+            AwsAccountId=os.environ.get('TEST_ACCOUNT_ID', '123456789012'),
             DataSetId='ds-456',
             IngestionId='ing-abc',
         )
