@@ -2604,9 +2604,8 @@ class QuickSightClient:
             }
         }
         if format_string:
-            fmt_config = QuickSightClient._build_format_config(format_string)
             field['NumericalMeasureField']['FormatConfiguration'] = {
-                'FormatConfiguration': fmt_config,
+                'NumericFormatConfiguration': QuickSightClient._build_format_config(format_string),
             }
         return field
 
@@ -2803,10 +2802,7 @@ class QuickSightClient:
                 # Build conditional formatting using PrimaryValue TextColor
                 # Format: expression compares aggregated value against threshold
                 agg_fn = aggregation.upper()
-                if agg_fn in ('COUNT', 'DISTINCT_COUNT'):
-                    agg_expr = f'{agg_fn}({{{column}}})'
-                else:
-                    agg_expr = f'{agg_fn}({{{column}}})'
+                agg_expr = f'{agg_fn}({{{column}}})'
 
                 conditions = []
                 for rule in conditional_format:
