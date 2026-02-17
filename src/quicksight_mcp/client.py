@@ -289,6 +289,7 @@ class QuickSightClient:
     def _paginate(self, paginator_name: str, result_key: str) -> List[Dict]:
         """Paginate a QuickSight list API with auto-retry on expired credentials.
 
+        Ensures account_id is resolved before pagination.
         Replaces the duplicated try/retry pattern across list_datasets,
         list_analyses, and list_dashboards.
 
@@ -300,6 +301,8 @@ class QuickSightClient:
         Returns:
             Combined list of results from all pages.
         """
+        self._ensure_account_id()
+
         def _run() -> List[Dict]:
             paginator = self.client.get_paginator(paginator_name)
             results: List[Dict] = []
@@ -390,7 +393,7 @@ class QuickSightClient:
         """
         # Try server-side search first
         try:
-            response = self.client.search_data_sets(
+            response = self._call('search_data_sets',
                 AwsAccountId=self.account_id,
                 Filters=[{
                     'Operator': 'StringContains',
@@ -475,7 +478,7 @@ class QuickSightClient:
             if key in dataset:
                 update_params[key] = dataset[key]
 
-        response = self.client.update_data_set(**update_params)
+        response = self._call('update_data_set', **update_params)
 
         if self._should_verify(verify):
             self._verify_dataset_sql(dataset_id, new_sql)
@@ -647,9 +650,12 @@ class QuickSightClient:
         if backup_first:
             self.backup_dataset(dataset_id, backup_dir or self._backup_dir())
 
-        # Ensure required keys
+        # Validate required keys
+        if not definition.get('PhysicalTableMap'):
+            raise ValueError("definition must include a non-empty PhysicalTableMap")
+        if not definition.get('LogicalTableMap'):
+            raise ValueError("definition must include a non-empty LogicalTableMap")
         if 'Name' not in definition:
-            # Fall back to the current dataset name
             current = self.get_dataset(dataset_id)
             definition['Name'] = current['Name']
 
@@ -1626,7 +1632,7 @@ class QuickSightClient:
             dashboard_id: Dashboard ID.
             version_number: Version number to publish.
         """
-        response = self.client.update_dashboard_published_version(
+        response = self._call('update_dashboard_published_version',
             AwsAccountId=self.account_id,
             DashboardId=dashboard_id,
             VersionNumber=version_number,
