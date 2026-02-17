@@ -122,12 +122,15 @@ class TestCreateComboChartDataLabels:
         combo = definition['Sheets'][0]['Visuals'][0]['ComboChartVisual']
         chart_cfg = combo['ChartConfiguration']
 
-        assert 'DataLabels' in chart_cfg
-        assert chart_cfg['DataLabels']['Visibility'] == 'VISIBLE'
-        assert chart_cfg['DataLabels']['Position'] == 'OUTSIDE'
+        assert 'BarDataLabels' in chart_cfg
+        assert chart_cfg['BarDataLabels']['Visibility'] == 'VISIBLE'
+        assert chart_cfg['BarDataLabels']['Position'] == 'OUTSIDE'
+        assert 'LineDataLabels' in chart_cfg
+        assert chart_cfg['LineDataLabels']['Visibility'] == 'VISIBLE'
+        assert chart_cfg['LineDataLabels']['Position'] == 'TOP'
 
     def test_create_combo_chart_no_data_labels_by_default(self):
-        """Without show_data_labels, DataLabels key is absent."""
+        """Without show_data_labels, BarDataLabels/LineDataLabels keys are absent."""
         self.client.create_combo_chart(
             analysis_id='an-001',
             sheet_id='sheet1',
@@ -143,7 +146,8 @@ class TestCreateComboChartDataLabels:
         call_args = self.client.update_analysis.call_args
         definition = call_args[0][1]
         combo = definition['Sheets'][0]['Visuals'][0]['ComboChartVisual']
-        assert 'DataLabels' not in combo['ChartConfiguration']
+        assert 'BarDataLabels' not in combo['ChartConfiguration']
+        assert 'LineDataLabels' not in combo['ChartConfiguration']
 
 
 class TestCreateComboChartFormatStrings:
