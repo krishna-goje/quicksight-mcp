@@ -296,7 +296,10 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
         start = time.time()
         client = get_client()
         try:
-            cf = json.loads(conditional_format) if conditional_format else None
+            try:
+                cf = json.loads(conditional_format) if conditional_format else None
+            except json.JSONDecodeError as je:
+                return {"error": f"Invalid JSON in conditional_format: {je}"}
             result = client.create_kpi(
                 analysis_id, sheet_id, title, column, aggregation, dataset_identifier,
                 format_string=format_string or None,

@@ -2568,20 +2568,30 @@ class QuickSightClient:
             is_date = QuickSightClient._is_date_column(column)
 
             if is_date:
-                return {
+                field = {
                     'DateMeasureField': {
                         'FieldId': fid,
                         'Column': col,
                         'AggregationFunction': count_fn,
                     }
                 }
-            return {
+                if format_string:
+                    field['DateMeasureField']['FormatConfiguration'] = {
+                        'NumericFormatConfiguration': QuickSightClient._build_format_config(format_string),
+                    }
+                return field
+            field = {
                 'CategoricalMeasureField': {
                     'FieldId': fid,
                     'Column': col,
                     'AggregationFunction': count_fn,
                 }
             }
+            if format_string:
+                field['CategoricalMeasureField']['FormatConfiguration'] = {
+                    'NumericFormatConfiguration': QuickSightClient._build_format_config(format_string),
+                }
+            return field
 
         # Numeric aggregations (SUM, AVG, etc.) require SimpleNumericalAggregation
         field = {
@@ -2594,61 +2604,64 @@ class QuickSightClient:
             }
         }
         if format_string:
+            fmt_config = QuickSightClient._build_format_config(format_string)
             field['NumericalMeasureField']['FormatConfiguration'] = {
-                'FormatConfiguration': {
-                    'NumberDisplayFormatConfiguration': {
-                        'Prefix': '',
-                        'NumberScale': 'NONE',
-                        'DecimalPlacesConfiguration': {'DecimalPlaces': 0},
-                    }
+                'FormatConfiguration': fmt_config,
+            }
+        return field
+
+    @staticmethod
+    def _count_decimals(fmt: str) -> int:
+        """Count decimal places from a format string like '#,##0.00' → 2."""
+        if '.' not in fmt:
+            return 0
+        after_dot = fmt.split('.')[-1].rstrip('%').rstrip('$')
+        return len([c for c in after_dot if c == '0'])
+
+    @staticmethod
+    def _build_format_config(format_string: str) -> Dict:
+        """Build a QuickSight FormatConfiguration from a format pattern.
+
+        Supported patterns:
+        - ``'#,##0'`` or ``'#,##0.00'`` → NumberDisplayFormatConfiguration
+        - ``'$#,##0'`` or ``'$#,##0.00'`` → CurrencyDisplayFormatConfiguration
+        - ``'0.0%'`` or ``'0%'`` → PercentageDisplayFormatConfiguration
+        """
+        decimals = QuickSightClient._count_decimals(format_string)
+        has_comma = ',' in format_string
+
+        if '$' in format_string:
+            return {
+                'CurrencyDisplayFormatConfiguration': {
+                    'Prefix': '$',
+                    'NumberScale': 'NONE',
+                    'DecimalPlacesConfiguration': {'DecimalPlaces': decimals},
+                    'SeparatorConfiguration': {
+                        'ThousandsSeparator': {'Visibility': 'VISIBLE', 'Symbol': 'COMMA'},
+                        'DecimalSeparator': 'DOT',
+                    },
                 }
             }
-            # Parse common format patterns
-            if '$' in format_string:
-                field['NumericalMeasureField']['FormatConfiguration'] = {
-                    'FormatConfiguration': {
-                        'CurrencyDisplayFormatConfiguration': {
-                            'Prefix': '$',
-                            'NumberScale': 'NONE',
-                            'DecimalPlacesConfiguration': {
-                                'DecimalPlaces': format_string.count('0') - format_string.index('.') - 1 if '.' in format_string else 0,
-                            },
-                            'SeparatorConfiguration': {
-                                'ThousandsSeparator': {'Visibility': 'VISIBLE', 'Symbol': 'COMMA'},
-                                'DecimalSeparator': 'DOT',
-                            },
-                        }
-                    }
+        if '%' in format_string:
+            return {
+                'PercentageDisplayFormatConfiguration': {
+                    'DecimalPlacesConfiguration': {'DecimalPlaces': decimals},
+                    'SeparatorConfiguration': {'DecimalSeparator': 'DOT'},
                 }
-            elif '%' in format_string:
-                field['NumericalMeasureField']['FormatConfiguration'] = {
-                    'FormatConfiguration': {
-                        'PercentageDisplayFormatConfiguration': {
-                            'DecimalPlacesConfiguration': {
-                                'DecimalPlaces': format_string.replace('%', '').count('0') - format_string.replace('%', '').index('.') - 1 if '.' in format_string else 0,
-                            },
-                            'SeparatorConfiguration': {
-                                'DecimalSeparator': 'DOT',
-                            },
-                        }
-                    }
-                }
-            else:
-                field['NumericalMeasureField']['FormatConfiguration'] = {
-                    'FormatConfiguration': {
-                        'NumberDisplayFormatConfiguration': {
-                            'NumberScale': 'NONE',
-                            'DecimalPlacesConfiguration': {
-                                'DecimalPlaces': format_string.count('0') - format_string.index('.') - 1 if '.' in format_string else 0,
-                            },
-                            'SeparatorConfiguration': {
-                                'ThousandsSeparator': {'Visibility': 'VISIBLE' if ',' in format_string else 'HIDDEN', 'Symbol': 'COMMA'},
-                                'DecimalSeparator': 'DOT',
-                            },
-                        }
-                    }
-                }
-        return field
+            }
+        return {
+            'NumberDisplayFormatConfiguration': {
+                'NumberScale': 'NONE',
+                'DecimalPlacesConfiguration': {'DecimalPlaces': decimals},
+                'SeparatorConfiguration': {
+                    'ThousandsSeparator': {
+                        'Visibility': 'VISIBLE' if has_comma else 'HIDDEN',
+                        'Symbol': 'COMMA',
+                    },
+                    'DecimalSeparator': 'DOT',
+                },
+            }
+        }
 
     _DATE_SUFFIXES = ('_AT', '_DATE', '_TIME', '_TIMESTAMP', '_ON', '_DT', '_DAY')
     _DATE_EXACT = ('CREATED', 'UPDATED', 'DELETED')
