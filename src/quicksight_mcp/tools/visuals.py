@@ -275,12 +275,9 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
     def create_kpi(
         analysis_id: str, sheet_id: str, title: str,
         column: str, aggregation: str, dataset_identifier: str,
+        format_string: str = "", conditional_format: str = "",
     ) -> dict:
         """Create a KPI visual from simple parameters.
-
-        This is the easiest way to add a KPI. Just provide the column
-        name and aggregation — the full visual definition is constructed
-        automatically.
 
         Args:
             analysis_id: The QuickSight analysis ID.
@@ -288,14 +285,22 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             title: Display title (e.g., "Total Contracts").
             column: Column name (e.g., "FLIP_TOKEN").
             aggregation: SUM, COUNT, AVG, MIN, MAX, or DISTINCT_COUNT.
-            dataset_identifier: The dataset identifier. Find available
-                identifiers using describe_analysis.
+            dataset_identifier: The dataset identifier.
+            format_string: Display format (e.g., "#,##0", "$#,##0.00", "0.0%").
+                Leave empty for default formatting.
+            conditional_format: JSON string of color rules. Example:
+                '[{"condition": ">= 100", "color": "#2CAF4A"},
+                  {"condition": "< 50", "color": "#DE3B00"}]'
+                Leave empty for no conditional formatting.
         """
         start = time.time()
         client = get_client()
         try:
+            cf = json.loads(conditional_format) if conditional_format else None
             result = client.create_kpi(
-                analysis_id, sheet_id, title, column, aggregation, dataset_identifier
+                analysis_id, sheet_id, title, column, aggregation, dataset_identifier,
+                format_string=format_string or None,
+                conditional_format=cf,
             )
             get_tracker().record_call(
                 "create_kpi",
@@ -321,6 +326,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
         analysis_id: str, sheet_id: str, title: str,
         category_column: str, value_column: str, value_aggregation: str,
         dataset_identifier: str, orientation: str = "VERTICAL",
+        format_string: str = "", show_data_labels: bool = False,
     ) -> dict:
         """Create a bar chart from simple parameters.
 
@@ -340,6 +346,8 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             result = client.create_bar_chart(
                 analysis_id, sheet_id, title, category_column,
                 value_column, value_aggregation, dataset_identifier, orientation,
+                format_string=format_string or None,
+                show_data_labels=show_data_labels,
             )
             get_tracker().record_call(
                 "create_bar_chart",
@@ -365,6 +373,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
         analysis_id: str, sheet_id: str, title: str,
         date_column: str, value_column: str, value_aggregation: str,
         dataset_identifier: str, date_granularity: str = "WEEK",
+        format_string: str = "", show_data_labels: bool = False,
     ) -> dict:
         """Create a line chart from simple parameters.
 
@@ -384,6 +393,8 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             result = client.create_line_chart(
                 analysis_id, sheet_id, title, date_column,
                 value_column, value_aggregation, dataset_identifier, date_granularity,
+                format_string=format_string or None,
+                show_data_labels=show_data_labels,
             )
             get_tracker().record_call(
                 "create_line_chart",
