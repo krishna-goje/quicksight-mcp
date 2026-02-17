@@ -286,6 +286,34 @@ class QuickSightClient:
                 return getattr(self.client, method_name)(**kwargs)
             raise
 
+    def _paginate(self, paginator_name: str, result_key: str) -> List[Dict]:
+        """Paginate a QuickSight list API with auto-retry on expired credentials.
+
+        Replaces the duplicated try/retry pattern across list_datasets,
+        list_analyses, and list_dashboards.
+
+        Args:
+            paginator_name: Boto3 paginator name (e.g. ``'list_data_sets'``).
+            result_key: Key in each page response containing the result list
+                        (e.g. ``'DataSetSummaries'``).
+
+        Returns:
+            Combined list of results from all pages.
+        """
+        def _run() -> List[Dict]:
+            paginator = self.client.get_paginator(paginator_name)
+            results: List[Dict] = []
+            for page in paginator.paginate(AwsAccountId=self.account_id):
+                results.extend(page.get(result_key, []))
+            return results
+
+        try:
+            return _run()
+        except Exception as e:
+            if self._refresh_on_expired(e):
+                return _run()
+            raise
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -347,19 +375,7 @@ class QuickSightClient:
             if time.time() - _dataset_cache['timestamp'] < _dataset_cache['ttl']:
                 return _dataset_cache['data']
 
-        try:
-            paginator = self.client.get_paginator('list_data_sets')
-            datasets: List[Dict] = []
-            for page in paginator.paginate(AwsAccountId=self.account_id):
-                datasets.extend(page.get('DataSetSummaries', []))
-        except Exception as e:
-            if self._refresh_on_expired(e):
-                paginator = self.client.get_paginator('list_data_sets')
-                datasets = []
-                for page in paginator.paginate(AwsAccountId=self.account_id):
-                    datasets.extend(page.get('DataSetSummaries', []))
-            else:
-                raise
+        datasets = self._paginate('list_data_sets', 'DataSetSummaries')
 
         _dataset_cache['data'] = datasets
         _dataset_cache['timestamp'] = time.time()
@@ -533,6 +549,203 @@ class QuickSightClient:
         _dataset_cache['data'] = None
         _dataset_cache['timestamp'] = 0
 
+    def create_dataset(
+        self,
+        name: str,
+        sql: str,
+        data_source_arn: str,
+        import_mode: str = 'SPICE',
+        columns: Optional[List[Dict[str, str]]] = None,
+        backup_first: bool = False,
+    ) -> str:
+        """Create a new dataset from a SQL query.
+
+        Args:
+            name: Human-readable dataset name.
+            sql: SQL query string for the dataset.
+            data_source_arn: ARN of the data source to query against.
+            import_mode: ``'SPICE'`` (cached) or ``'DIRECT_QUERY'`` (live).
+            columns: List of ``{'Name': ..., 'Type': ...}`` column definitions.
+                If ``None``, infers a single ``*`` column of type ``STRING``.
+            backup_first: Unused for create (kept for API consistency).
+
+        Returns:
+            The new dataset ID.
+        """
+        self._ensure_account_id()
+
+        dataset_id = str(uuid.uuid4())
+        physical_table_id = f"physical-{dataset_id[:8]}"
+        logical_table_id = f"logical-{dataset_id[:8]}"
+
+        # Infer basic columns from SQL if not provided
+        if columns is None:
+            columns = [{'Name': 'Column1', 'Type': 'STRING'}]
+
+        physical_table_map = {
+            physical_table_id: {
+                'CustomSql': {
+                    'DataSourceArn': data_source_arn,
+                    'Name': name,
+                    'SqlQuery': sql,
+                    'Columns': columns,
+                },
+            },
+        }
+
+        logical_table_map = {
+            logical_table_id: {
+                'Alias': name,
+                'Source': {
+                    'PhysicalTableId': physical_table_id,
+                },
+            },
+        }
+
+        self._call(
+            'create_data_set',
+            AwsAccountId=self.account_id,
+            DataSetId=dataset_id,
+            Name=name,
+            PhysicalTableMap=physical_table_map,
+            LogicalTableMap=logical_table_map,
+            ImportMode=import_mode,
+        )
+
+        # Invalidate dataset list cache
+        self.clear_dataset_cache()
+
+        logger.info("Created dataset %s (%s)", dataset_id, name)
+        return dataset_id
+
+    def update_dataset_definition(
+        self,
+        dataset_id: str,
+        definition: Dict[str, Any],
+        backup_first: bool = True,
+        backup_dir: Optional[str] = None,
+    ) -> Dict:
+        """Update full dataset definition (columns, joins, calculated columns).
+
+        This is the general-purpose dataset update method. Use it when you need
+        to modify the PhysicalTableMap, LogicalTableMap, or other structural
+        elements beyond just the SQL query.
+
+        Args:
+            dataset_id: Dataset ID.
+            definition: Full dataset definition dict. Must include at minimum
+                ``Name``, ``PhysicalTableMap``, ``LogicalTableMap``, and
+                ``ImportMode``.
+            backup_first: Back up the current dataset before writing (default ``True``).
+            backup_dir: Override backup directory.
+
+        Returns:
+            AWS API response dict.
+        """
+        self._ensure_account_id()
+
+        if backup_first:
+            self.backup_dataset(dataset_id, backup_dir or self._backup_dir())
+
+        # Ensure required keys
+        if 'Name' not in definition:
+            # Fall back to the current dataset name
+            current = self.get_dataset(dataset_id)
+            definition['Name'] = current['Name']
+
+        update_params: Dict[str, Any] = {
+            'AwsAccountId': self.account_id,
+            'DataSetId': dataset_id,
+            'Name': definition['Name'],
+            'PhysicalTableMap': definition.get('PhysicalTableMap', {}),
+            'LogicalTableMap': definition.get('LogicalTableMap', {}),
+            'ImportMode': definition.get('ImportMode', 'SPICE'),
+        }
+
+        # Preserve optional top-level keys if present in the definition
+        for key in ('ColumnGroups', 'FieldFolders', 'RowLevelPermissionDataSet',
+                     'DataSetUsageConfiguration', 'ColumnLevelPermissionRules',
+                     'RowLevelPermissionTagConfiguration'):
+            if key in definition:
+                update_params[key] = definition[key]
+
+        response = self._call('update_data_set', **update_params)
+
+        # Invalidate dataset list cache
+        self.clear_dataset_cache()
+
+        logger.info("Dataset %s definition updated", dataset_id)
+        return response
+
+    def cancel_refresh(self, dataset_id: str, ingestion_id: str) -> Dict:
+        """Cancel a running SPICE ingestion.
+
+        Args:
+            dataset_id: Dataset ID.
+            ingestion_id: Ingestion ID of the running refresh.
+
+        Returns:
+            AWS API response dict with cancellation status.
+        """
+        self._ensure_account_id()
+        response = self._call(
+            'cancel_ingestion',
+            AwsAccountId=self.account_id,
+            DataSetId=dataset_id,
+            IngestionId=ingestion_id,
+        )
+        logger.info("Cancelled ingestion %s for dataset %s", ingestion_id, dataset_id)
+        return response
+
+    def modify_dataset_sql(
+        self,
+        dataset_id: str,
+        find: str,
+        replace: str,
+        backup_first: bool = True,
+        backup_dir: Optional[str] = None,
+        verify: Optional[bool] = None,
+    ) -> Dict:
+        """Find and replace text in dataset SQL without full get/edit/update.
+
+        Convenience method that reads the current SQL, applies a string
+        replacement, and updates the dataset in a single operation.
+
+        Args:
+            dataset_id: Dataset ID.
+            find: Text to search for in the current SQL.
+            replace: Replacement text.
+            backup_first: Back up before writing (default ``True``).
+            backup_dir: Override backup directory.
+            verify: Verify the SQL was persisted after update.
+
+        Returns:
+            Update response dict.
+
+        Raises:
+            ValueError: If ``find`` text is not present in the current SQL.
+        """
+        current_sql = self.get_dataset_sql(dataset_id)
+        if current_sql is None:
+            raise ValueError(
+                f"Dataset {dataset_id} does not use Custom SQL. "
+                f"Cannot perform find/replace."
+            )
+
+        if find not in current_sql:
+            raise ValueError(
+                f"Text to find not present in current SQL. "
+                f"Find text ({len(find)} chars): {find[:100]}..."
+            )
+
+        new_sql = current_sql.replace(find, replace)
+        return self.update_dataset_sql(
+            dataset_id, new_sql,
+            backup_first=backup_first,
+            backup_dir=backup_dir,
+            verify=verify,
+        )
+
     # =========================================================================
     # ANALYSES
     # =========================================================================
@@ -546,19 +759,7 @@ class QuickSightClient:
             if time.time() - _analysis_cache['timestamp'] < _analysis_cache['ttl']:
                 return _analysis_cache['data']
 
-        try:
-            paginator = self.client.get_paginator('list_analyses')
-            analyses: List[Dict] = []
-            for page in paginator.paginate(AwsAccountId=self.account_id):
-                analyses.extend(page.get('AnalysisSummaryList', []))
-        except Exception as e:
-            if self._refresh_on_expired(e):
-                paginator = self.client.get_paginator('list_analyses')
-                analyses = []
-                for page in paginator.paginate(AwsAccountId=self.account_id):
-                    analyses.extend(page.get('AnalysisSummaryList', []))
-            else:
-                raise
+        analyses = self._paginate('list_analyses', 'AnalysisSummaryList')
 
         _analysis_cache['data'] = analyses
         _analysis_cache['timestamp'] = time.time()
@@ -1284,19 +1485,7 @@ class QuickSightClient:
             if time.time() - _dashboard_cache['timestamp'] < _dashboard_cache['ttl']:
                 return _dashboard_cache['data']
 
-        try:
-            paginator = self.client.get_paginator('list_dashboards')
-            dashboards: List[Dict] = []
-            for page in paginator.paginate(AwsAccountId=self.account_id):
-                dashboards.extend(page.get('DashboardSummaryList', []))
-        except Exception as e:
-            if self._refresh_on_expired(e):
-                paginator = self.client.get_paginator('list_dashboards')
-                dashboards = []
-                for page in paginator.paginate(AwsAccountId=self.account_id):
-                    dashboards.extend(page.get('DashboardSummaryList', []))
-            else:
-                raise
+        dashboards = self._paginate('list_dashboards', 'DashboardSummaryList')
 
         _dashboard_cache['data'] = dashboards
         _dashboard_cache['timestamp'] = time.time()
@@ -3105,6 +3294,164 @@ class QuickSightClient:
         }
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id, row_span=16)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        if self._should_verify(None):
+            self._verify_visual_exists(analysis_id, visual_id)
+
+        result['visual_id'] = visual_id
+        return result
+
+    def create_combo_chart(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        title: str,
+        category_column: str,
+        bar_column: str,
+        bar_aggregation: str,
+        line_column: str,
+        line_aggregation: str,
+        dataset_identifier: str,
+        bar_format_string: Optional[str] = None,
+        line_format_string: Optional[str] = None,
+        show_data_labels: bool = False,
+        backup_first: bool = True,
+    ) -> Dict:
+        """Create a combo chart (bars + line) from simple parameters.
+
+        A combo chart displays bar values and line values on the same chart,
+        sharing a category axis.  For example, count bars with a percentage line.
+
+        Args:
+            analysis_id: Analysis ID.
+            sheet_id: Target sheet.
+            title: Display title.
+            category_column: Dimension column for the shared X-axis.
+            bar_column: Measure column rendered as bars.
+            bar_aggregation: Aggregation for the bar measure (SUM, COUNT, etc.).
+            line_column: Measure column rendered as a line.
+            line_aggregation: Aggregation for the line measure.
+            dataset_identifier: Dataset identifier.
+            bar_format_string: Display format for bar values (e.g., ``'#,##0'``).
+            line_format_string: Display format for line values (e.g., ``'0.0%'``).
+            show_data_labels: Show value labels on bars and line.
+
+        Returns:
+            dict with ``visual_id``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        visual_id = f'combo_{uuid.uuid4().hex[:12]}'
+
+        category = self._make_dimension_field(category_column, dataset_identifier)
+        bar_value = self._make_measure_field(
+            bar_column, dataset_identifier, bar_aggregation,
+            format_string=bar_format_string,
+        )
+        line_value = self._make_measure_field(
+            line_column, dataset_identifier, line_aggregation,
+            format_string=line_format_string,
+        )
+
+        visual_def = {
+            'ComboChartVisual': {
+                'VisualId': visual_id,
+                'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': title}},
+                'Subtitle': {'Visibility': 'HIDDEN'},
+                'ChartConfiguration': {
+                    'FieldWells': {
+                        'ComboChartAggregatedFieldWells': {
+                            'Category': [category],
+                            'BarValues': [bar_value],
+                            'LineValues': [line_value],
+                            'Colors': [],
+                        }
+                    },
+                    'BarsArrangement': 'CLUSTERED',
+                },
+            }
+        }
+
+        if show_data_labels:
+            visual_def['ComboChartVisual']['ChartConfiguration']['DataLabels'] = {
+                'Visibility': 'VISIBLE',
+                'Position': 'OUTSIDE',
+            }
+
+        self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
+
+        result = self.update_analysis(
+            analysis_id, definition, backup_first=backup_first,
+            expected_last_updated=(
+                last_updated if self._should_lock(None) else None
+            ),
+        )
+
+        if self._should_verify(None):
+            self._verify_visual_exists(analysis_id, visual_id)
+
+        result['visual_id'] = visual_id
+        return result
+
+    def create_pie_chart(
+        self,
+        analysis_id: str,
+        sheet_id: str,
+        title: str,
+        group_column: str,
+        value_column: str,
+        value_aggregation: str,
+        dataset_identifier: str,
+        format_string: Optional[str] = None,
+        backup_first: bool = True,
+    ) -> Dict:
+        """Create a pie chart from simple parameters.
+
+        Args:
+            analysis_id: Analysis ID.
+            sheet_id: Target sheet.
+            title: Display title.
+            group_column: Dimension column for pie slices (e.g., "MARKET_NAME").
+            value_column: Measure column for slice sizes (e.g., "REVENUE").
+            value_aggregation: SUM, COUNT, AVG, etc.
+            dataset_identifier: Dataset identifier.
+            format_string: Display format for values (e.g., ``'#,##0'``, ``'0.0%'``).
+
+        Returns:
+            dict with ``visual_id``.
+        """
+        definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
+        visual_id = f'pie_{uuid.uuid4().hex[:12]}'
+
+        category = self._make_dimension_field(group_column, dataset_identifier)
+        value = self._make_measure_field(
+            value_column, dataset_identifier, value_aggregation,
+            format_string=format_string,
+        )
+
+        visual_def = {
+            'PieChartVisual': {
+                'VisualId': visual_id,
+                'Title': {'Visibility': 'VISIBLE', 'FormatText': {'PlainText': title}},
+                'Subtitle': {'Visibility': 'HIDDEN'},
+                'ChartConfiguration': {
+                    'FieldWells': {
+                        'PieChartAggregatedFieldWells': {
+                            'Category': [category],
+                            'Values': [value],
+                        }
+                    },
+                },
+            }
+        }
+
+        self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
 
         result = self.update_analysis(
             analysis_id, definition, backup_first=backup_first,

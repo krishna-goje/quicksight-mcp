@@ -4,6 +4,7 @@ Provides tools for listing, searching, inspecting, and modifying
 QuickSight datasets and their underlying SQL, plus SPICE refresh management.
 """
 
+import json
 import time
 import logging
 from typing import Callable
@@ -340,6 +341,201 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
             get_tracker().record_call(
                 "list_recent_refreshes",
                 {"dataset_id": dataset_id, "limit": limit},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def create_dataset(
+        name: str, sql: str, data_source_arn: str, import_mode: str = "SPICE"
+    ) -> dict:
+        """Create a new QuickSight dataset from a SQL query.
+
+        Args:
+            name: Human-readable dataset name.
+            sql: The SQL query for the dataset. Must be valid SQL for the
+                 target data source (e.g., Snowflake, Redshift).
+            data_source_arn: ARN of the QuickSight data source to query.
+                             Find this in the QuickSight console or via AWS CLI.
+            import_mode: 'SPICE' (cached, default) or 'DIRECT_QUERY' (live).
+
+        Returns the new dataset ID. After creating a SPICE dataset, call
+        refresh_dataset to load data.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            dataset_id = client.create_dataset(
+                name=name,
+                sql=sql,
+                data_source_arn=data_source_arn,
+                import_mode=import_mode,
+            )
+            get_tracker().record_call(
+                "create_dataset",
+                {"name": name},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "created",
+                "dataset_id": dataset_id,
+                "name": name,
+                "import_mode": import_mode,
+                "note": (
+                    "Dataset created. If import_mode is SPICE, call "
+                    "refresh_dataset to load data."
+                ),
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "create_dataset",
+                {"name": name},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def update_dataset_definition(dataset_id: str, definition_json: str) -> dict:
+        """Update full dataset definition from JSON.
+
+        WARNING: This replaces the entire dataset definition. A backup is
+        created automatically before the update.
+
+        Args:
+            dataset_id: The QuickSight dataset ID.
+            definition_json: JSON string containing the full dataset definition.
+                Must include PhysicalTableMap, LogicalTableMap, ImportMode.
+                Obtain the current definition from get_dataset first.
+
+        Use this for structural changes (adding joins, calculated columns,
+        changing column types) that go beyond simple SQL updates.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            definition = json.loads(definition_json)
+            client.update_dataset_definition(
+                dataset_id, definition, backup_first=True
+            )
+            get_tracker().record_call(
+                "update_dataset_definition",
+                {"dataset_id": dataset_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "dataset_id": dataset_id,
+                "backup_created": True,
+                "note": (
+                    "Dataset definition updated. If this is a SPICE dataset, "
+                    "call refresh_dataset to reload data."
+                ),
+            }
+        except json.JSONDecodeError as e:
+            get_tracker().record_call(
+                "update_dataset_definition",
+                {"dataset_id": dataset_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": f"Invalid JSON: {e}"}
+        except Exception as e:
+            get_tracker().record_call(
+                "update_dataset_definition",
+                {"dataset_id": dataset_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def cancel_refresh(dataset_id: str, ingestion_id: str) -> dict:
+        """Cancel a running SPICE dataset refresh.
+
+        Use this to stop a SPICE ingestion that is stuck in QUEUED or RUNNING
+        state. Useful when old ingestions block new ones.
+
+        Args:
+            dataset_id: The QuickSight dataset ID.
+            ingestion_id: The ingestion ID to cancel (from refresh_dataset
+                          or list_recent_refreshes).
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            client.cancel_refresh(dataset_id, ingestion_id)
+            get_tracker().record_call(
+                "cancel_refresh",
+                {"dataset_id": dataset_id, "ingestion_id": ingestion_id},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "cancelled",
+                "dataset_id": dataset_id,
+                "ingestion_id": ingestion_id,
+                "note": "Ingestion cancelled. You can now trigger a new refresh.",
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "cancel_refresh",
+                {"dataset_id": dataset_id, "ingestion_id": ingestion_id},
+                (time.time() - start) * 1000,
+                False,
+                str(e),
+            )
+            return {"error": str(e)}
+
+    @mcp.tool
+    def modify_dataset_sql(dataset_id: str, find: str, replace: str) -> dict:
+        """Find and replace text in a dataset's SQL query.
+
+        Convenience tool that reads the current SQL, applies a string
+        replacement, and updates the dataset. A backup is created automatically.
+
+        Args:
+            dataset_id: The QuickSight dataset ID.
+            find: Exact text to search for in the current SQL.
+            replace: Replacement text.
+
+        Raises an error if the find text is not present in the current SQL.
+        After modifying a SPICE dataset, call refresh_dataset to reload data.
+        """
+        start = time.time()
+        client = get_client()
+        try:
+            client.modify_dataset_sql(
+                dataset_id, find, replace, backup_first=True
+            )
+            get_tracker().record_call(
+                "modify_dataset_sql",
+                {"dataset_id": dataset_id, "find_len": len(find)},
+                (time.time() - start) * 1000,
+                True,
+            )
+            return {
+                "status": "success",
+                "dataset_id": dataset_id,
+                "backup_created": True,
+                "find": find[:100] + ("..." if len(find) > 100 else ""),
+                "replace": replace[:100] + ("..." if len(replace) > 100 else ""),
+                "note": (
+                    "SQL updated. If this is a SPICE dataset, call "
+                    "refresh_dataset to reload data."
+                ),
+            }
+        except Exception as e:
+            get_tracker().record_call(
+                "modify_dataset_sql",
+                {"dataset_id": dataset_id, "find_len": len(find)},
                 (time.time() - start) * 1000,
                 False,
                 str(e),
