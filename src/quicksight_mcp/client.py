@@ -3385,9 +3385,13 @@ class QuickSightClient:
         }
 
         if show_data_labels:
-            visual_def['ComboChartVisual']['ChartConfiguration']['DataLabels'] = {
+            visual_def['ComboChartVisual']['ChartConfiguration']['BarDataLabels'] = {
                 'Visibility': 'VISIBLE',
                 'Position': 'OUTSIDE',
+            }
+            visual_def['ComboChartVisual']['ChartConfiguration']['LineDataLabels'] = {
+                'Visibility': 'VISIBLE',
+                'Position': 'TOP',
             }
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
