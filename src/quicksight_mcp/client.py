@@ -2544,13 +2544,17 @@ class QuickSightClient:
     @staticmethod
     def _make_measure_field(
         column: str, dataset_identifier: str, aggregation: str = 'SUM',
-        field_id: Optional[str] = None,
+        field_id: Optional[str] = None, format_string: Optional[str] = None,
     ) -> Dict:
         """Construct a measure field definition.
 
         Uses ``CategoricalMeasureField`` for COUNT/DISTINCT_COUNT
         (which works on any column type), and ``NumericalMeasureField``
         for numeric aggregations (SUM, AVG, MIN, MAX, etc.).
+
+        Args:
+            format_string: Optional display format (e.g., ``'#,##0'``,
+                ``'$#,##0.00'``, ``'0.0%'``). Applied via FormatConfiguration.
         """
         agg = QuickSightClient._AGG_MAP.get(aggregation.upper(), aggregation.upper())
         fid = field_id or f'{uuid.uuid4().hex[:8]}.{column}'
@@ -2564,23 +2568,33 @@ class QuickSightClient:
             is_date = QuickSightClient._is_date_column(column)
 
             if is_date:
-                return {
+                field = {
                     'DateMeasureField': {
                         'FieldId': fid,
                         'Column': col,
                         'AggregationFunction': count_fn,
                     }
                 }
-            return {
+                if format_string:
+                    field['DateMeasureField']['FormatConfiguration'] = {
+                        'NumericFormatConfiguration': QuickSightClient._build_format_config(format_string),
+                    }
+                return field
+            field = {
                 'CategoricalMeasureField': {
                     'FieldId': fid,
                     'Column': col,
                     'AggregationFunction': count_fn,
                 }
             }
+            if format_string:
+                field['CategoricalMeasureField']['FormatConfiguration'] = {
+                    'NumericFormatConfiguration': QuickSightClient._build_format_config(format_string),
+                }
+            return field
 
         # Numeric aggregations (SUM, AVG, etc.) require SimpleNumericalAggregation
-        return {
+        field = {
             'NumericalMeasureField': {
                 'FieldId': fid,
                 'Column': col,
@@ -2589,8 +2603,66 @@ class QuickSightClient:
                 },
             }
         }
+        if format_string:
+            field['NumericalMeasureField']['FormatConfiguration'] = {
+                'NumericFormatConfiguration': QuickSightClient._build_format_config(format_string),
+            }
+        return field
 
-    _DATE_SUFFIXES = ('_AT', '_DATE', '_TIME', '_TIMESTAMP', '_ON', '_DT')
+    @staticmethod
+    def _count_decimals(fmt: str) -> int:
+        """Count decimal places from a format string like '#,##0.00' → 2."""
+        if '.' not in fmt:
+            return 0
+        after_dot = fmt.split('.')[-1].rstrip('%').rstrip('$')
+        return len([c for c in after_dot if c == '0'])
+
+    @staticmethod
+    def _build_format_config(format_string: str) -> Dict:
+        """Build a QuickSight FormatConfiguration from a format pattern.
+
+        Supported patterns:
+        - ``'#,##0'`` or ``'#,##0.00'`` → NumberDisplayFormatConfiguration
+        - ``'$#,##0'`` or ``'$#,##0.00'`` → CurrencyDisplayFormatConfiguration
+        - ``'0.0%'`` or ``'0%'`` → PercentageDisplayFormatConfiguration
+        """
+        decimals = QuickSightClient._count_decimals(format_string)
+        has_comma = ',' in format_string
+
+        if '$' in format_string:
+            return {
+                'CurrencyDisplayFormatConfiguration': {
+                    'Prefix': '$',
+                    'NumberScale': 'NONE',
+                    'DecimalPlacesConfiguration': {'DecimalPlaces': decimals},
+                    'SeparatorConfiguration': {
+                        'ThousandsSeparator': {'Visibility': 'VISIBLE', 'Symbol': 'COMMA'},
+                        'DecimalSeparator': 'DOT',
+                    },
+                }
+            }
+        if '%' in format_string:
+            return {
+                'PercentageDisplayFormatConfiguration': {
+                    'DecimalPlacesConfiguration': {'DecimalPlaces': decimals},
+                    'SeparatorConfiguration': {'DecimalSeparator': 'DOT'},
+                }
+            }
+        return {
+            'NumberDisplayFormatConfiguration': {
+                'NumberScale': 'NONE',
+                'DecimalPlacesConfiguration': {'DecimalPlaces': decimals},
+                'SeparatorConfiguration': {
+                    'ThousandsSeparator': {
+                        'Visibility': 'VISIBLE' if has_comma else 'HIDDEN',
+                        'Symbol': 'COMMA',
+                    },
+                    'DecimalSeparator': 'DOT',
+                },
+            }
+        }
+
+    _DATE_SUFFIXES = ('_AT', '_DATE', '_TIME', '_TIMESTAMP', '_ON', '_DT', '_DAY')
     _DATE_EXACT = ('CREATED', 'UPDATED', 'DELETED')
 
     @staticmethod
@@ -2677,6 +2749,8 @@ class QuickSightClient:
         column: str,
         aggregation: str,
         dataset_identifier: str,
+        format_string: Optional[str] = None,
+        conditional_format: Optional[List[Dict]] = None,
         backup_first: bool = True,
     ) -> Dict:
         """Create a KPI visual from simple parameters.
@@ -2688,13 +2762,17 @@ class QuickSightClient:
             column: Column name (e.g., "FLIP_TOKEN").
             aggregation: SUM, COUNT, AVG, MIN, MAX, DISTINCT_COUNT.
             dataset_identifier: Dataset identifier string.
+            format_string: Display format (e.g., ``'#,##0'``, ``'$#,##0.00'``, ``'0.0%'``).
+            conditional_format: List of threshold rules for color coding.
+                Each rule: ``{"condition": ">= 100", "color": "#2CAF4A"}``
+                (green for values >= 100). Supports ``>=``, ``<=``, ``>``, ``<``, ``==``.
 
         Returns:
             dict with ``visual_id``.
         """
         definition, last_updated = self.get_analysis_definition_with_version(analysis_id)
         visual_id = f'kpi_{uuid.uuid4().hex[:12]}'
-        measure = self._make_measure_field(column, dataset_identifier, aggregation)
+        measure = self._make_measure_field(column, dataset_identifier, aggregation, format_string=format_string)
 
         visual_def = {
             'KPIVisual': {
@@ -2710,6 +2788,40 @@ class QuickSightClient:
                 },
             }
         }
+
+        # Add conditional formatting if provided
+        if conditional_format:
+            # Extract the field ID from the measure
+            field_id = None
+            for key in ('NumericalMeasureField', 'CategoricalMeasureField', 'DateMeasureField'):
+                if key in measure:
+                    field_id = measure[key].get('FieldId')
+                    break
+
+            if field_id:
+                # Build conditional formatting using PrimaryValue TextColor
+                # Format: expression compares aggregated value against threshold
+                agg_fn = aggregation.upper()
+                agg_expr = f'{agg_fn}({{{column}}})'
+
+                conditions = []
+                for rule in conditional_format:
+                    cond = rule.get('condition', '')
+                    color = rule.get('color', '#2CAF4A')
+                    conditions.append({
+                        'PrimaryValue': {
+                            'TextColor': {
+                                'Solid': {
+                                    'Expression': f'{agg_expr} {cond}',
+                                    'Color': color,
+                                }
+                            }
+                        }
+                    })
+
+                visual_def['KPIVisual']['ConditionalFormatting'] = {
+                    'ConditionalFormattingOptions': conditions
+                }
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id, col_span=12, row_span=6)
 
@@ -2736,6 +2848,8 @@ class QuickSightClient:
         value_aggregation: str,
         dataset_identifier: str,
         orientation: str = 'VERTICAL',
+        format_string: Optional[str] = None,
+        show_data_labels: bool = False,
         backup_first: bool = True,
     ) -> Dict:
         """Create a bar chart from simple parameters.
@@ -2749,6 +2863,8 @@ class QuickSightClient:
             value_aggregation: SUM, COUNT, etc.
             dataset_identifier: Dataset identifier.
             orientation: VERTICAL or HORIZONTAL.
+            format_string: Display format for values (e.g., ``'#,##0'``, ``'0.0%'``).
+            show_data_labels: Show value labels on bars.
 
         Returns:
             dict with ``visual_id``.
@@ -2757,7 +2873,7 @@ class QuickSightClient:
         visual_id = f'bar_{uuid.uuid4().hex[:12]}'
 
         category = self._make_dimension_field(category_column, dataset_identifier)
-        value = self._make_measure_field(value_column, dataset_identifier, value_aggregation)
+        value = self._make_measure_field(value_column, dataset_identifier, value_aggregation, format_string=format_string)
 
         visual_def = {
             'BarChartVisual': {
@@ -2778,6 +2894,12 @@ class QuickSightClient:
                 },
             }
         }
+
+        if show_data_labels:
+            visual_def['BarChartVisual']['ChartConfiguration']['DataLabels'] = {
+                'Visibility': 'VISIBLE',
+                'Position': 'OUTSIDE',
+            }
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
 
@@ -2804,6 +2926,8 @@ class QuickSightClient:
         value_aggregation: str,
         dataset_identifier: str,
         date_granularity: str = 'WEEK',
+        format_string: Optional[str] = None,
+        show_data_labels: bool = False,
         backup_first: bool = True,
     ) -> Dict:
         """Create a line chart from simple parameters.
@@ -2817,6 +2941,8 @@ class QuickSightClient:
             value_aggregation: SUM, COUNT, etc.
             dataset_identifier: Dataset identifier.
             date_granularity: DAY, WEEK, MONTH, QUARTER, YEAR.
+            format_string: Display format for values.
+            show_data_labels: Show value labels on data points.
 
         Returns:
             dict with ``visual_id``.
@@ -2828,7 +2954,7 @@ class QuickSightClient:
             date_column, dataset_identifier, is_date=True,
             date_granularity=date_granularity,
         )
-        value = self._make_measure_field(value_column, dataset_identifier, value_aggregation)
+        value = self._make_measure_field(value_column, dataset_identifier, value_aggregation, format_string=format_string)
 
         visual_def = {
             'LineChartVisual': {
@@ -2847,6 +2973,11 @@ class QuickSightClient:
                 },
             }
         }
+
+        if show_data_labels:
+            visual_def['LineChartVisual']['ChartConfiguration']['DataLabels'] = {
+                'Visibility': 'VISIBLE',
+            }
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
 
@@ -2872,6 +3003,7 @@ class QuickSightClient:
         value_columns: List[str],
         value_aggregations: List[str],
         dataset_identifier: str,
+        format_strings: Optional[List[str]] = None,
         backup_first: bool = True,
     ) -> Dict:
         """Create a pivot table from simple parameters.
@@ -2892,9 +3024,10 @@ class QuickSightClient:
         visual_id = f'pivot_{uuid.uuid4().hex[:12]}'
 
         rows = [self._make_dimension_field(c, dataset_identifier) for c in row_columns]
+        fmts = format_strings or [None] * len(value_columns)
         values = [
-            self._make_measure_field(c, dataset_identifier, a)
-            for c, a in zip(value_columns, value_aggregations)
+            self._make_measure_field(c, dataset_identifier, a, format_string=f)
+            for c, a, f in zip(value_columns, value_aggregations, fmts)
         ]
 
         visual_def = {
