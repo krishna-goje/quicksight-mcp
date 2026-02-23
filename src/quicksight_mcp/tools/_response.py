@@ -38,6 +38,36 @@ def paginate_list(
     return result
 
 
+def truncate_if_needed(result: Dict[str, Any], tool_name: str = "") -> Dict[str, Any]:
+    """Truncate oversized dict responses to fit within CHARACTER_LIMIT."""
+    import json as _json
+
+    try:
+        serialized = _json.dumps(result, default=str)
+    except (TypeError, ValueError):
+        return result
+
+    if len(serialized) <= CHARACTER_LIMIT:
+        return result
+
+    # Truncate the largest list values
+    for key in sorted(result, key=lambda k: len(str(result[k])), reverse=True):
+        if isinstance(result[key], list) and len(result[key]) > 5:
+            result[key] = result[key][: len(result[key]) // 2]
+            result["_truncated"] = True
+            result["_note"] = (
+                f"Response truncated to fit {CHARACTER_LIMIT} character limit. "
+                f"Use limit/offset parameters for full results."
+            )
+            try:
+                if len(_json.dumps(result, default=str)) <= CHARACTER_LIMIT:
+                    return result
+            except (TypeError, ValueError):
+                pass
+
+    return result
+
+
 def format_error_response(
     error: Exception,
     error_type: str = "unexpected",

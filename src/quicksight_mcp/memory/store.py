@@ -126,7 +126,7 @@ class MemoryStore:
                 prefix=".mem_",
                 suffix=".tmp",
             )
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2, default=str)
             os.rename(tmp_path, str(self._path))
         except Exception as e:
