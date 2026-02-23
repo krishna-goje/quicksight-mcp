@@ -1,15 +1,17 @@
-"""QuickSight MCP Server v1.0 — The most comprehensive AWS QuickSight MCP server.
+"""QuickSight MCP Server v1.1 — The most comprehensive AWS QuickSight MCP server.
 
 Architecture:
     core/       — AwsClient, TTLCache, shared types
     services/   — 11 focused service modules (datasets, analyses, dashboards, etc.)
     safety/     — Structured exceptions, verification, destructive-change guard
-    memory/     — Full context memory (usage, analysis, error, preferences)
+    memory/     — Full context memory + brain (usage, analysis, error, knowledge graph)
+    brain/      — Self-improvement engine (BrainAnalyzer: patterns, latency, workflows)
     tools/      — MCP tool definitions with @qs_tool decorator and Pydantic validation
     config.py   — Settings dataclass (single source of truth for configuration)
+    logging_config.py — Structured JSON logging with correlation IDs
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "__version__",

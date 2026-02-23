@@ -4,19 +4,20 @@ Provides tools for listing, searching, and inspecting QuickSight analyses --
 including their sheets, visuals, calculated fields, parameters, and filters.
 """
 
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
 
+from quicksight_mcp.tools._decorator import qs_tool
+
 logger = logging.getLogger(__name__)
 
 
-def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable):
+def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None):
     """Register all analysis-related MCP tools."""
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def list_analyses() -> dict:
         """List all QuickSight analyses with their names, IDs, and status.
 
@@ -28,32 +29,21 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         - id: Analysis ID (use this for other analysis operations)
         - status: CREATION_SUCCESSFUL, UPDATE_SUCCESSFUL, etc.
         """
-        start = time.time()
         client = get_client()
-        try:
-            analyses = client.list_analyses()
-            result = {
-                "count": len(analyses),
-                "analyses": [
-                    {
-                        "name": a.get("Name"),
-                        "id": a.get("AnalysisId"),
-                        "status": a.get("Status"),
-                    }
-                    for a in analyses
-                ],
-            }
-            get_tracker().record_call(
-                "list_analyses", {}, (time.time() - start) * 1000, True
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "list_analyses", {}, (time.time() - start) * 1000, False, str(e)
-            )
-            return {"error": str(e)}
+        analyses = client.list_analyses()
+        return {
+            "count": len(analyses),
+            "analyses": [
+                {
+                    "name": a.get("Name"),
+                    "id": a.get("AnalysisId"),
+                    "status": a.get("Status"),
+                }
+                for a in analyses
+            ],
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def search_analyses(name: str) -> dict:
         """Search QuickSight analyses by name (case-insensitive partial match).
 
@@ -63,40 +53,22 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
 
         Returns matching analyses with their IDs and statuses.
         """
-        start = time.time()
         client = get_client()
-        try:
-            results = client.search_analyses(name)
-            result = {
-                "query": name,
-                "count": len(results),
-                "analyses": [
-                    {
-                        "name": a.get("Name"),
-                        "id": a.get("AnalysisId"),
-                        "status": a.get("Status"),
-                    }
-                    for a in results
-                ],
-            }
-            get_tracker().record_call(
-                "search_analyses",
-                {"name": name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "search_analyses",
-                {"name": name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        results = client.search_analyses(name)
+        return {
+            "query": name,
+            "count": len(results),
+            "analyses": [
+                {
+                    "name": a.get("Name"),
+                    "id": a.get("AnalysisId"),
+                    "status": a.get("Status"),
+                }
+                for a in results
+            ],
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def describe_analysis(analysis_id: str) -> dict:
         """Get a structured summary of a QuickSight analysis.
 
@@ -113,65 +85,47 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
             - total counts of calculated fields, parameters, and filter groups
             - dataset identifiers used by the analysis
         """
-        start = time.time()
         client = get_client()
-        try:
-            definition = client.get_analysis_definition(analysis_id)
-            analysis = client.get_analysis(analysis_id)
+        definition = client.get_analysis_definition(analysis_id)
+        analysis = client.get_analysis(analysis_id)
 
-            # Extract sheets summary
-            sheets_raw = definition.get("Sheets", [])
-            sheets = []
-            for s in sheets_raw:
-                visuals = s.get("Visuals", [])
-                sheets.append(
-                    {
-                        "name": s.get("Name", ""),
-                        "id": s.get("SheetId", ""),
-                        "visual_count": len(visuals),
-                    }
-                )
-
-            calc_fields = definition.get("CalculatedFields", [])
-            params = definition.get("ParameterDeclarations", [])
-            filter_groups = definition.get("FilterGroups", [])
-            ds_id_decls = definition.get("DataSetIdentifierDeclarations", [])
-
-            result = {
-                "analysis_id": analysis_id,
-                "name": analysis.get("Name", ""),
-                "status": analysis.get("Status", ""),
-                "sheets_count": len(sheets),
-                "sheets": sheets,
-                "calculated_fields_count": len(calc_fields),
-                "parameters_count": len(params),
-                "filter_groups_count": len(filter_groups),
-                "dataset_identifiers": [
-                    {
-                        "identifier": d.get("Identifier"),
-                        "dataset_arn": d.get("DataSetArn"),
-                    }
-                    for d in ds_id_decls
-                ],
-            }
-            get_tracker().record_call(
-                "describe_analysis",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
+        # Extract sheets summary
+        sheets_raw = definition.get("Sheets", [])
+        sheets = []
+        for s in sheets_raw:
+            visuals = s.get("Visuals", [])
+            sheets.append(
+                {
+                    "name": s.get("Name", ""),
+                    "id": s.get("SheetId", ""),
+                    "visual_count": len(visuals),
+                }
             )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "describe_analysis",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
 
-    @mcp.tool
+        calc_fields = definition.get("CalculatedFields", [])
+        params = definition.get("ParameterDeclarations", [])
+        filter_groups = definition.get("FilterGroups", [])
+        ds_id_decls = definition.get("DataSetIdentifierDeclarations", [])
+
+        return {
+            "analysis_id": analysis_id,
+            "name": analysis.get("Name", ""),
+            "status": analysis.get("Status", ""),
+            "sheets_count": len(sheets),
+            "sheets": sheets,
+            "calculated_fields_count": len(calc_fields),
+            "parameters_count": len(params),
+            "filter_groups_count": len(filter_groups),
+            "dataset_identifiers": [
+                {
+                    "identifier": d.get("Identifier"),
+                    "dataset_arn": d.get("DataSetArn"),
+                }
+                for d in ds_id_decls
+            ],
+        }
+
+    @qs_tool(mcp, get_memory, read_only=True)
     def list_visuals(analysis_id: str) -> dict:
         """List all visuals in a QuickSight analysis with type and location info.
 
@@ -184,32 +138,15 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         - title: Visual title (if set)
         - sheet_name: Which sheet the visual is on
         """
-        start = time.time()
         client = get_client()
-        try:
-            visuals = client.get_visuals(analysis_id)
-            get_tracker().record_call(
-                "list_visuals",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "analysis_id": analysis_id,
-                "count": len(visuals),
-                "visuals": visuals,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "list_visuals",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        visuals = client.get_visuals(analysis_id)
+        return {
+            "analysis_id": analysis_id,
+            "count": len(visuals),
+            "visuals": visuals,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def list_calculated_fields(analysis_id: str) -> dict:
         """List all calculated fields in a QuickSight analysis.
 
@@ -221,32 +158,15 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         - expression: The QuickSight expression (e.g., sum({Revenue}))
         - dataset_identifier: Which dataset the field belongs to
         """
-        start = time.time()
         client = get_client()
-        try:
-            fields = client.get_calculated_fields(analysis_id)
-            get_tracker().record_call(
-                "list_calculated_fields",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "analysis_id": analysis_id,
-                "count": len(fields),
-                "calculated_fields": fields,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "list_calculated_fields",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        fields = client.get_calculated_fields(analysis_id)
+        return {
+            "analysis_id": analysis_id,
+            "count": len(fields),
+            "calculated_fields": fields,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_columns_used(analysis_id: str) -> dict:
         """Get a frequency map of columns used across an analysis.
 
@@ -258,36 +178,19 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         understanding which columns are most important and for impact
         analysis before modifying a dataset.
         """
-        start = time.time()
         client = get_client()
-        try:
-            usage = client.get_columns_used(analysis_id)
-            # Sort by frequency descending
-            sorted_usage = dict(
-                sorted(usage.items(), key=lambda x: x[1], reverse=True)
-            )
-            get_tracker().record_call(
-                "get_columns_used",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "analysis_id": analysis_id,
-                "unique_columns": len(sorted_usage),
-                "columns": sorted_usage,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_columns_used",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        usage = client.get_columns_used(analysis_id)
+        # Sort by frequency descending
+        sorted_usage = dict(
+            sorted(usage.items(), key=lambda x: x[1], reverse=True)
+        )
+        return {
+            "analysis_id": analysis_id,
+            "unique_columns": len(sorted_usage),
+            "columns": sorted_usage,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_parameters(analysis_id: str) -> dict:
         """List all parameters defined in a QuickSight analysis.
 
@@ -297,32 +200,15 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         Returns parameter declarations with names, types, and default values.
         Parameters drive dynamic filters and controls in dashboards.
         """
-        start = time.time()
         client = get_client()
-        try:
-            params = client.get_parameters(analysis_id)
-            get_tracker().record_call(
-                "get_parameters",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "analysis_id": analysis_id,
-                "count": len(params),
-                "parameters": params,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_parameters",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        params = client.get_parameters(analysis_id)
+        return {
+            "analysis_id": analysis_id,
+            "count": len(params),
+            "parameters": params,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_analysis_raw(analysis_id: str) -> dict:
         """Get the complete raw analysis definition for inspection.
 
@@ -336,31 +222,14 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         Args:
             analysis_id: The QuickSight analysis ID.
         """
-        start = time.time()
         client = get_client()
-        try:
-            raw = client.get_analysis_raw(analysis_id)
-            get_tracker().record_call(
-                "get_analysis_raw",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "analysis_id": analysis_id,
-                "definition": raw,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_analysis_raw",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        raw = client.get_analysis_raw(analysis_id)
+        return {
+            "analysis_id": analysis_id,
+            "definition": raw,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_filters(analysis_id: str) -> dict:
         """List all filter groups defined in a QuickSight analysis.
 
@@ -370,32 +239,15 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         Returns filter group definitions including scope (which sheets/visuals
         they apply to) and the filter conditions.
         """
-        start = time.time()
         client = get_client()
-        try:
-            filters = client.get_filters(analysis_id)
-            get_tracker().record_call(
-                "get_filters",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "analysis_id": analysis_id,
-                "count": len(filters),
-                "filter_groups": filters,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_filters",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        filters = client.get_filters(analysis_id)
+        return {
+            "analysis_id": analysis_id,
+            "count": len(filters),
+            "filter_groups": filters,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def verify_analysis_health(analysis_id: str) -> dict:
         """Run a comprehensive health check on a QuickSight analysis.
 
@@ -415,28 +267,10 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         Returns a health report with pass/fail for each check and a list
         of any issues found.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.verify_analysis_health(analysis_id)
-            get_tracker().record_call(
-                "verify_analysis_health",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "verify_analysis_health",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        return client.verify_analysis_health(analysis_id)
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def snapshot_analysis(analysis_id: str) -> dict:
         """Take a snapshot of the current analysis state for QA comparison.
 
@@ -448,33 +282,15 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
 
         Returns the snapshot with a snapshot_id to use with diff_analysis.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.snapshot_analysis(analysis_id)
-            get_tracker().record_call(
-                "snapshot_analysis",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "snapshot_analysis",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        return client.snapshot_analysis(analysis_id)
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def diff_analysis(analysis_id: str, snapshot_id: str) -> dict:
         """Compare current analysis state against a previous snapshot.
 
         Use AFTER making changes to see what was added, removed, or
-        modified. This is the QA reviewer — ensures changes had the
+        modified. This is the QA reviewer -- ensures changes had the
         intended effect and nothing unexpected broke.
 
         Args:
@@ -484,23 +300,5 @@ def register_analysis_tools(mcp: FastMCP, get_client: Callable, get_tracker: Cal
         Returns a detailed diff: added/removed/changed sheets, visuals,
         and calculated fields.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.diff_analysis(analysis_id, snapshot_id)
-            get_tracker().record_call(
-                "diff_analysis",
-                {"analysis_id": analysis_id, "snapshot_id": snapshot_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "diff_analysis",
-                {"analysis_id": analysis_id, "snapshot_id": snapshot_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        return client.diff_analysis(analysis_id, snapshot_id)

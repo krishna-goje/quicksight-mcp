@@ -4,21 +4,22 @@ Provides tools for creating, reading, updating, and deleting calculated
 fields within QuickSight analyses.
 """
 
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
 
+from quicksight_mcp.tools._decorator import qs_tool
+
 logger = logging.getLogger(__name__)
 
 
 def register_calculated_field_tools(
-    mcp: FastMCP, get_client: Callable, get_tracker: Callable
+    mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None
 ):
     """Register all calculated-field-related MCP tools."""
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_calculated_field(analysis_id: str, name: str) -> dict:
         """Get details of a specific calculated field in an analysis.
 
@@ -29,42 +30,25 @@ def register_calculated_field_tools(
         Returns the field's expression, dataset identifier, and name,
         or indicates that the field was not found.
         """
-        start = time.time()
         client = get_client()
-        try:
-            field = client.get_calculated_field(analysis_id, name)
-            get_tracker().record_call(
-                "get_calculated_field",
-                {"analysis_id": analysis_id, "name": name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            if field is None:
-                return {
-                    "analysis_id": analysis_id,
-                    "name": name,
-                    "found": False,
-                    "note": (
-                        f"No calculated field named '{name}' found. "
-                        "Use list_calculated_fields to see available fields."
-                    ),
-                }
+        field = client.get_calculated_field(analysis_id, name)
+        if field is None:
             return {
                 "analysis_id": analysis_id,
-                "found": True,
-                **field,
+                "name": name,
+                "found": False,
+                "note": (
+                    f"No calculated field named '{name}' found. "
+                    "Use list_calculated_fields to see available fields."
+                ),
             }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_calculated_field",
-                {"analysis_id": analysis_id, "name": name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        return {
+            "analysis_id": analysis_id,
+            "found": True,
+            **field,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def add_calculated_field(
         analysis_id: str,
         name: str,
@@ -92,48 +76,23 @@ def register_calculated_field_tools(
 
         Returns confirmation with the created field details.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.add_calculated_field(
-                analysis_id, name, expression, dataset_identifier
-            )
-            get_tracker().record_call(
-                "add_calculated_field",
-                {
-                    "analysis_id": analysis_id,
-                    "name": name,
-                    "dataset_identifier": dataset_identifier,
-                },
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "field_name": name,
-                "expression": expression,
-                "dataset_identifier": dataset_identifier,
-                "note": (
-                    "Field added. You can now use it in visuals. "
-                    "If publishing to a dashboard, call publish_dashboard."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "add_calculated_field",
-                {
-                    "analysis_id": analysis_id,
-                    "name": name,
-                    "dataset_identifier": dataset_identifier,
-                },
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.add_calculated_field(
+            analysis_id, name, expression, dataset_identifier
+        )
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "field_name": name,
+            "expression": expression,
+            "dataset_identifier": dataset_identifier,
+            "note": (
+                "Field added. You can now use it in visuals. "
+                "If publishing to a dashboard, call publish_dashboard."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def update_calculated_field(
         analysis_id: str, name: str, new_expression: str
     ) -> dict:
@@ -151,40 +110,23 @@ def register_calculated_field_tools(
 
         Returns confirmation with the updated expression.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.update_calculated_field(
-                analysis_id, name, new_expression
-            )
-            get_tracker().record_call(
-                "update_calculated_field",
-                {"analysis_id": analysis_id, "name": name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "field_name": name,
-                "new_expression": new_expression,
-                "note": (
-                    "Expression updated. All visuals using this field "
-                    "will reflect the change. Publish dashboard to "
-                    "propagate to viewers."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "update_calculated_field",
-                {"analysis_id": analysis_id, "name": name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.update_calculated_field(
+            analysis_id, name, new_expression
+        )
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "field_name": name,
+            "new_expression": new_expression,
+            "note": (
+                "Expression updated. All visuals using this field "
+                "will reflect the change. Publish dashboard to "
+                "propagate to viewers."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def delete_calculated_field(analysis_id: str, name: str) -> dict:
         """Delete a calculated field from a QuickSight analysis.
 
@@ -198,31 +140,14 @@ def register_calculated_field_tools(
             analysis_id: The QuickSight analysis ID.
             name: Exact name of the calculated field to delete.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.delete_calculated_field(analysis_id, name)
-            get_tracker().record_call(
-                "delete_calculated_field",
-                {"analysis_id": analysis_id, "name": name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "deleted_field": name,
-                "note": (
-                    "Field deleted. Check that no visuals were broken. "
-                    "Use backup_analysis to restore if needed."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "delete_calculated_field",
-                {"analysis_id": analysis_id, "name": name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.delete_calculated_field(analysis_id, name)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "deleted_field": name,
+            "note": (
+                "Field deleted. Check that no visuals were broken. "
+                "Use backup_analysis to restore if needed."
+            ),
+        }

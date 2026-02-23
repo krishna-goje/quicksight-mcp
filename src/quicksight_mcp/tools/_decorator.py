@@ -2,6 +2,8 @@
 
 Wraps every MCP tool function with:
 - Timing (records duration in milliseconds)
+- Correlation ID generation (via contextvars, unique per call)
+- Structured JSON logging (start + complete events)
 - Memory recording (tool call + params)
 - Structured error formatting with recovery suggestions
 - Tool annotation registration (read-only, destructive, idempotent hints)
@@ -15,6 +17,12 @@ import time
 from typing import Any, Callable, Optional
 
 from quicksight_mcp.safety.exceptions import QSError
+from quicksight_mcp.logging_config import (
+    new_correlation_id,
+    set_tool_name,
+    log_tool_start,
+    log_tool_complete,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +63,21 @@ def qs_tool(
             tool_name = fn.__name__
             start = time.time()
 
+            # Set up correlation context for this call
+            new_correlation_id()
+            set_tool_name(tool_name)
+
+            # Extract resource_id from params for logging
+            resource_id = (
+                kwargs.get("dataset_id", "")
+                or kwargs.get("analysis_id", "")
+                or kwargs.get("dashboard_id", "")
+                or ""
+            )
+
+            # Log start
+            log_tool_start(tool_name, kwargs)
+
             try:
                 result = fn(*args, **kwargs)
                 duration_ms = (time.time() - start) * 1000
@@ -69,6 +92,12 @@ def qs_tool(
                             )
                     except Exception:
                         pass  # Never let memory recording break the tool
+
+                # Log completion
+                log_tool_complete(
+                    tool_name, duration_ms, success=True,
+                    resource_id=resource_id,
+                )
 
                 # Truncate if too long
                 result = _truncate_response(result, tool_name)
@@ -87,6 +116,13 @@ def qs_tool(
                             )
                     except Exception:
                         pass
+
+                # Log failure
+                log_tool_complete(
+                    tool_name, duration_ms, success=False,
+                    resource_id=resource_id,
+                    error=str(e), error_type=e.error_type,
+                )
 
                 # Build structured error response
                 error_response = {
@@ -125,6 +161,13 @@ def qs_tool(
                             )
                     except Exception:
                         pass
+
+                # Log failure
+                log_tool_complete(
+                    tool_name, duration_ms, success=False,
+                    resource_id=resource_id,
+                    error=str(e), error_type="unexpected",
+                )
 
                 return {
                     "isError": True,

@@ -5,17 +5,18 @@ tracking usage patterns, errors, and performance over time. These are
 a key differentiator: the MCP server gets smarter the more you use it.
 """
 
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
 
+from quicksight_mcp.tools._decorator import qs_tool
+
 logger = logging.getLogger(__name__)
 
 
 def register_learning_tools(
-    mcp: FastMCP, get_tracker: Callable, get_optimizer: Callable
+    mcp: FastMCP, get_tracker: Callable, get_optimizer: Callable, get_memory=None
 ):
     """Register learning and insights MCP tools.
 
@@ -24,7 +25,7 @@ def register_learning_tools(
     QuickSight resources directly.
     """
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_learning_insights() -> dict:
         """Show what the server has learned from your QuickSight usage patterns.
 
@@ -41,44 +42,27 @@ def register_learning_tools(
 
         The more you use the server, the better the insights become.
         """
-        start = time.time()
         tracker = get_tracker()
         optimizer = get_optimizer()
-        try:
-            insights = tracker.get_insights()
-            recommendations = optimizer.get_recommendations()
-            tracker.record_call(
-                "get_learning_insights",
-                {},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "insights": insights,
-                "recommendations": [
-                    {
-                        "type": r.get("type"),
-                        "message": r.get("message"),
-                        "priority": r.get("priority"),
-                    }
-                    for r in recommendations
-                ],
-                "note": (
-                    "These insights are generated from your actual usage. "
-                    "The more you use the server, the better they get."
-                ),
-            }
-        except Exception as e:
-            tracker.record_call(
-                "get_learning_insights",
-                {},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        insights = tracker.get_insights()
+        recommendations = optimizer.get_recommendations()
+        return {
+            "insights": insights,
+            "recommendations": [
+                {
+                    "type": r.get("type"),
+                    "message": r.get("message"),
+                    "priority": r.get("priority"),
+                }
+                for r in recommendations
+            ],
+            "note": (
+                "These insights are generated from your actual usage. "
+                "The more you use the server, the better they get."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_error_patterns() -> dict:
         """Show common QuickSight errors and their known fixes.
 
@@ -95,30 +79,13 @@ def register_learning_tools(
         Call this when something goes wrong to see if it is a known issue
         with a known fix.
         """
-        start = time.time()
         tracker = get_tracker()
-        try:
-            patterns = tracker.get_error_patterns()
-            tracker.record_call(
-                "get_error_patterns",
-                {},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "error_patterns": patterns,
-                "note": (
-                    "Error patterns are derived from your actual usage history. "
-                    "Recurring errors may indicate a systemic issue worth "
-                    "investigating in the QuickSight console."
-                ),
-            }
-        except Exception as e:
-            tracker.record_call(
-                "get_error_patterns",
-                {},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        patterns = tracker.get_error_patterns()
+        return {
+            "error_patterns": patterns,
+            "note": (
+                "Error patterns are derived from your actual usage history. "
+                "Recurring errors may indicate a systemic issue worth "
+                "investigating in the QuickSight console."
+            ),
+        }

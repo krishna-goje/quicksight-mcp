@@ -1,18 +1,18 @@
 """QuickSight MCP Server - Entry point.
 
-This is the main server module that creates the FastMCP instance,
-lazily initializes shared dependencies (client, tracker, optimizer),
-and registers all tool modules.
+Creates the FastMCP instance, lazily initializes shared dependencies
+(ServiceContainer, MemoryManager), and registers all tool modules.
+
+v1.1: Wired to use service layer + memory system instead of monolithic client.
 """
 
 import logging
-import os
 
 from fastmcp import FastMCP
 
-from quicksight_mcp.client import QuickSightClient
-from quicksight_mcp.learning.tracker import UsageTracker
-from quicksight_mcp.learning.optimizer import Optimizer
+from quicksight_mcp.config import Settings
+from quicksight_mcp.services import ServiceContainer
+from quicksight_mcp.memory.manager import MemoryManager
 
 # Import tool registration functions
 from quicksight_mcp.tools.datasets import register_dataset_tools
@@ -28,62 +28,98 @@ from quicksight_mcp.tools.filters import register_filter_tools
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Shared configuration
+# ---------------------------------------------------------------------------
+_settings = Settings()
+
+# ---------------------------------------------------------------------------
+# Structured logging (must be set up before any tool calls)
+# ---------------------------------------------------------------------------
+from quicksight_mcp.logging_config import setup_logging  # noqa: E402
+
+setup_logging(
+    log_dir=_settings.log_dir,
+    log_level=_settings.log_level,
+)
+logger.info("QuickSight MCP v1.1 structured logging initialized")
+
 # Create the MCP server
 mcp = FastMCP("QuickSight MCP")
 
 # ---------------------------------------------------------------------------
 # Lazy-initialized globals
 # ---------------------------------------------------------------------------
-_client: QuickSightClient | None = None
-_tracker: UsageTracker | None = None
-_optimizer: Optimizer | None = None
+_services: ServiceContainer | None = None
+_memory: MemoryManager | None = None
+
+# Backward-compat: old client + tracker for tool files not yet migrated
+_client = None
+_tracker = None
 
 
-def get_client() -> QuickSightClient:
-    """Get or create the QuickSight client (lazy init)."""
+def get_services() -> ServiceContainer:
+    """Get or create the ServiceContainer (lazy init)."""
+    global _services
+    if _services is None:
+        _services = ServiceContainer(_settings)
+    return _services
+
+
+def get_memory() -> MemoryManager:
+    """Get or create the MemoryManager (lazy init)."""
+    global _memory
+    if _memory is None:
+        _memory = MemoryManager(
+            storage_dir=_settings.memory_dir,
+            enabled=_settings.learning_enabled,
+            max_entries=_settings.memory_max_entries,
+            max_file_bytes=_settings.memory_max_file_bytes,
+        )
+    return _memory
+
+
+def get_client():
+    """Backward-compat: get a QuickSightClient for tool files not yet migrated."""
     global _client
     if _client is None:
+        from quicksight_mcp.client import QuickSightClient
         _client = QuickSightClient()
     return _client
 
 
-def get_tracker() -> UsageTracker:
-    """Get or create the usage tracker (lazy init)."""
+def get_tracker():
+    """Backward-compat: proxy to MemoryManager.usage for tool files not yet migrated."""
     global _tracker
     if _tracker is None:
+        from quicksight_mcp.learning.tracker import UsageTracker
         _tracker = UsageTracker()
     return _tracker
 
 
-def get_optimizer() -> Optimizer:
-    """Get or create the optimizer (lazy init)."""
-    global _optimizer
-    if _optimizer is None:
-        _optimizer = Optimizer(get_tracker())
-    return _optimizer
+def get_optimizer():
+    """Backward-compat: get an Optimizer for the learning tools."""
+    from quicksight_mcp.learning.optimizer import Optimizer
+    return Optimizer(get_tracker())
 
 
 # ---------------------------------------------------------------------------
 # Register all tools with the MCP server
 # ---------------------------------------------------------------------------
-register_dataset_tools(mcp, get_client, get_tracker)
-register_analysis_tools(mcp, get_client, get_tracker)
-register_calculated_field_tools(mcp, get_client, get_tracker)
-register_dashboard_tools(mcp, get_client, get_tracker)
-register_backup_tools(mcp, get_client, get_tracker)
-register_learning_tools(mcp, get_tracker, get_optimizer)
-register_sheet_tools(mcp, get_client, get_tracker)
-register_visual_tools(mcp, get_client, get_tracker)
-register_parameter_tools(mcp, get_client, get_tracker)
-register_filter_tools(mcp, get_client, get_tracker)
+register_dataset_tools(mcp, get_client, get_tracker, get_memory=get_memory)
+register_analysis_tools(mcp, get_client, get_tracker, get_memory=get_memory)
+register_calculated_field_tools(mcp, get_client, get_tracker, get_memory=get_memory)
+register_dashboard_tools(mcp, get_client, get_tracker, get_memory=get_memory)
+register_backup_tools(mcp, get_client, get_tracker, get_memory=get_memory)
+register_learning_tools(mcp, get_tracker, get_optimizer, get_memory=get_memory)
+register_sheet_tools(mcp, get_client, get_tracker, get_memory=get_memory)
+register_visual_tools(mcp, get_client, get_tracker, get_memory=get_memory)
+register_parameter_tools(mcp, get_client, get_tracker, get_memory=get_memory)
+register_filter_tools(mcp, get_client, get_tracker, get_memory=get_memory)
 
 
 def main():
     """Entry point for the quicksight-mcp CLI command."""
-    logging.basicConfig(
-        level=os.environ.get("LOG_LEVEL", "INFO"),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
     mcp.run()
 
 

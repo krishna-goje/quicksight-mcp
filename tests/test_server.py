@@ -131,8 +131,57 @@ class TestVersionInfo:
         for part in parts:
             assert part.isdigit()
 
-    def test_version_is_1_0_0(self):
-        """Test version is 1.0.0."""
+    def test_version_is_1_1_0(self):
+        """Test version is 1.1.0."""
         from quicksight_mcp import __version__
 
-        assert __version__ == "1.0.0"
+        assert __version__ == "1.1.0"
+
+
+class TestServerWiring:
+    """Test that server.py correctly wires services and memory."""
+
+    def test_get_memory_returns_memory_manager(self):
+        """get_memory() should return a MemoryManager."""
+        from quicksight_mcp.server import get_memory
+        from quicksight_mcp.memory.manager import MemoryManager
+
+        mem = get_memory()
+        assert isinstance(mem, MemoryManager)
+
+    def test_get_memory_is_singleton(self):
+        """get_memory() should return the same instance on repeated calls."""
+        from quicksight_mcp.server import get_memory
+
+        mem1 = get_memory()
+        mem2 = get_memory()
+        assert mem1 is mem2
+
+    def test_get_memory_is_enabled(self):
+        """The memory system should be enabled by default."""
+        from quicksight_mcp.server import get_memory
+
+        mem = get_memory()
+        assert mem.enabled is True
+
+    def test_get_memory_has_brain_components(self):
+        """get_memory() should return MemoryManager with brain components."""
+        from quicksight_mcp.server import get_memory
+
+        mem = get_memory()
+        assert hasattr(mem, "call_log")
+        assert hasattr(mem, "latency")
+        assert hasattr(mem, "knowledge")
+
+    def test_mcp_server_exists(self):
+        """The MCP server instance should exist."""
+        from quicksight_mcp.server import mcp
+
+        assert mcp is not None
+
+    def test_get_memory_callable_is_passed_to_tools(self):
+        """Verify get_memory is importable as a callable from server."""
+        from quicksight_mcp.server import get_memory
+
+        # get_memory should be a callable
+        assert callable(get_memory)

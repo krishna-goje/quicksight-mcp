@@ -5,19 +5,20 @@ QuickSight datasets and their underlying SQL, plus SPICE refresh management.
 """
 
 import json
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
 
+from quicksight_mcp.tools._decorator import qs_tool
+
 logger = logging.getLogger(__name__)
 
 
-def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable):
+def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None):
     """Register all dataset-related MCP tools."""
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def list_datasets() -> dict:
         """List all QuickSight datasets with their names, IDs, and import mode.
 
@@ -29,32 +30,21 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         Results are cached for 5 minutes. Use this to discover datasets
         before calling get_dataset_sql or update_dataset_sql.
         """
-        start = time.time()
         client = get_client()
-        try:
-            datasets = client.list_datasets()
-            result = {
-                "count": len(datasets),
-                "datasets": [
-                    {
-                        "name": d.get("Name"),
-                        "id": d.get("DataSetId"),
-                        "import_mode": d.get("ImportMode"),
-                    }
-                    for d in datasets
-                ],
-            }
-            get_tracker().record_call(
-                "list_datasets", {}, (time.time() - start) * 1000, True
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "list_datasets", {}, (time.time() - start) * 1000, False, str(e)
-            )
-            return {"error": str(e)}
+        datasets = client.list_datasets()
+        return {
+            "count": len(datasets),
+            "datasets": [
+                {
+                    "name": d.get("Name"),
+                    "id": d.get("DataSetId"),
+                    "import_mode": d.get("ImportMode"),
+                }
+                for d in datasets
+            ],
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def search_datasets(name: str) -> dict:
         """Search QuickSight datasets by name (case-insensitive partial match).
 
@@ -65,40 +55,22 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         Returns matching datasets with their IDs and import modes.
         Useful when you know part of a dataset name but not the exact ID.
         """
-        start = time.time()
         client = get_client()
-        try:
-            results = client.search_datasets(name)
-            result = {
-                "query": name,
-                "count": len(results),
-                "datasets": [
-                    {
-                        "name": d.get("Name"),
-                        "id": d.get("DataSetId"),
-                        "import_mode": d.get("ImportMode"),
-                    }
-                    for d in results
-                ],
-            }
-            get_tracker().record_call(
-                "search_datasets",
-                {"name": name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "search_datasets",
-                {"name": name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        results = client.search_datasets(name)
+        return {
+            "query": name,
+            "count": len(results),
+            "datasets": [
+                {
+                    "name": d.get("Name"),
+                    "id": d.get("DataSetId"),
+                    "import_mode": d.get("ImportMode"),
+                }
+                for d in results
+            ],
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_dataset(dataset_id: str) -> dict:
         """Get full metadata for a QuickSight dataset.
 
@@ -108,38 +80,21 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         Returns complete dataset information including name, columns,
         import mode, data source, row-level permissions, and more.
         """
-        start = time.time()
         client = get_client()
-        try:
-            dataset = client.get_dataset(dataset_id)
-            get_tracker().record_call(
-                "get_dataset",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "dataset_id": dataset_id,
-                "name": dataset.get("Name"),
-                "import_mode": dataset.get("ImportMode"),
-                "physical_table_count": len(dataset.get("PhysicalTableMap", {})),
-                "logical_table_count": len(dataset.get("LogicalTableMap", {})),
-                "output_columns": [
-                    {"name": c.get("Name"), "type": c.get("Type")}
-                    for c in dataset.get("OutputColumns", [])
-                ],
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_dataset",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        dataset = client.get_dataset(dataset_id)
+        return {
+            "dataset_id": dataset_id,
+            "name": dataset.get("Name"),
+            "import_mode": dataset.get("ImportMode"),
+            "physical_table_count": len(dataset.get("PhysicalTableMap", {})),
+            "logical_table_count": len(dataset.get("LogicalTableMap", {})),
+            "output_columns": [
+                {"name": c.get("Name"), "type": c.get("Type")}
+                for c in dataset.get("OutputColumns", [])
+            ],
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_dataset_sql(dataset_id: str) -> dict:
         """Get the SQL query powering a QuickSight dataset.
 
@@ -150,34 +105,17 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         or indicates if it uses a direct table reference instead.
         Use this to understand what data feeds a dataset before modifying it.
         """
-        start = time.time()
         client = get_client()
-        try:
-            sql = client.get_dataset_sql(dataset_id)
-            result = {"dataset_id": dataset_id, "sql": sql}
-            if sql is None:
-                result["note"] = (
-                    "Dataset does not use Custom SQL "
-                    "(may use a direct table reference)."
-                )
-            get_tracker().record_call(
-                "get_dataset_sql",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                True,
+        sql = client.get_dataset_sql(dataset_id)
+        result = {"dataset_id": dataset_id, "sql": sql}
+        if sql is None:
+            result["note"] = (
+                "Dataset does not use Custom SQL "
+                "(may use a direct table reference)."
             )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "get_dataset_sql",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        return result
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def update_dataset_sql(
         dataset_id: str, new_sql: str, backup_first: bool = True
     ) -> dict:
@@ -196,38 +134,21 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         After updating a SPICE dataset, call refresh_dataset to reload data.
         For DIRECT_QUERY datasets the change takes effect immediately.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.update_dataset_sql(
-                dataset_id, new_sql, backup_first=backup_first
-            )
-            get_tracker().record_call(
-                "update_dataset_sql",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "dataset_id": dataset_id,
-                "backup_created": backup_first,
-                "note": (
-                    "If this is a SPICE dataset, call refresh_dataset "
-                    "to reload data with the new SQL."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "update_dataset_sql",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.update_dataset_sql(
+            dataset_id, new_sql, backup_first=backup_first
+        )
+        return {
+            "status": "success",
+            "dataset_id": dataset_id,
+            "backup_created": backup_first,
+            "note": (
+                "If this is a SPICE dataset, call refresh_dataset "
+                "to reload data with the new SQL."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def refresh_dataset(dataset_id: str) -> dict:
         """Trigger a SPICE refresh (data reload) for a dataset.
 
@@ -241,37 +162,20 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         monitor progress. Typical SPICE refreshes take 30 seconds to
         several minutes depending on data volume.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.refresh_dataset(dataset_id)
-            get_tracker().record_call(
-                "refresh_dataset",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "refresh_triggered",
-                "dataset_id": dataset_id,
-                "ingestion_id": result.get("ingestion_id"),
-                "ingestion_status": result.get("status"),
-                "note": (
-                    "Use get_refresh_status with the ingestion_id "
-                    "to monitor progress."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "refresh_dataset",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        result = client.refresh_dataset(dataset_id)
+        return {
+            "status": "refresh_triggered",
+            "dataset_id": dataset_id,
+            "ingestion_id": result.get("ingestion_id"),
+            "ingestion_status": result.get("status"),
+            "note": (
+                "Use get_refresh_status with the ingestion_id "
+                "to monitor progress."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_refresh_status(dataset_id: str, ingestion_id: str) -> dict:
         """Check the status of a SPICE dataset refresh.
 
@@ -284,34 +188,17 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
             rows_ingested: Number of rows loaded (available when COMPLETED).
             error: Error message if the refresh FAILED.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.get_refresh_status(dataset_id, ingestion_id)
-            get_tracker().record_call(
-                "get_refresh_status",
-                {"dataset_id": dataset_id, "ingestion_id": ingestion_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "dataset_id": dataset_id,
-                "ingestion_id": ingestion_id,
-                "status": result.get("status"),
-                "rows_ingested": result.get("row_count"),
-                "error": result.get("error"),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_refresh_status",
-                {"dataset_id": dataset_id, "ingestion_id": ingestion_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        result = client.get_refresh_status(dataset_id, ingestion_id)
+        return {
+            "dataset_id": dataset_id,
+            "ingestion_id": ingestion_id,
+            "status": result.get("status"),
+            "rows_ingested": result.get("row_count"),
+            "error": result.get("error"),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def list_recent_refreshes(dataset_id: str, limit: int = 5) -> dict:
         """List recent SPICE refresh history for a dataset.
 
@@ -322,32 +209,15 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         Useful for checking if a dataset is refreshing normally, diagnosing
         failures, or finding previous ingestion IDs.
         """
-        start = time.time()
         client = get_client()
-        try:
-            refreshes = client.list_recent_refreshes(dataset_id, limit=limit)
-            get_tracker().record_call(
-                "list_recent_refreshes",
-                {"dataset_id": dataset_id, "limit": limit},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "dataset_id": dataset_id,
-                "count": len(refreshes),
-                "refreshes": refreshes,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "list_recent_refreshes",
-                {"dataset_id": dataset_id, "limit": limit},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        refreshes = client.list_recent_refreshes(dataset_id, limit=limit)
+        return {
+            "dataset_id": dataset_id,
+            "count": len(refreshes),
+            "refreshes": refreshes,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def create_dataset(
         name: str, sql: str, data_source_arn: str, import_mode: str = "SPICE"
     ) -> dict:
@@ -364,42 +234,25 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         Returns the new dataset ID. After creating a SPICE dataset, call
         refresh_dataset to load data.
         """
-        start = time.time()
         client = get_client()
-        try:
-            dataset_id = client.create_dataset(
-                name=name,
-                sql=sql,
-                data_source_arn=data_source_arn,
-                import_mode=import_mode,
-            )
-            get_tracker().record_call(
-                "create_dataset",
-                {"name": name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "created",
-                "dataset_id": dataset_id,
-                "name": name,
-                "import_mode": import_mode,
-                "note": (
-                    "Dataset created. If import_mode is SPICE, call "
-                    "refresh_dataset to load data."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "create_dataset",
-                {"name": name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        dataset_id = client.create_dataset(
+            name=name,
+            sql=sql,
+            data_source_arn=data_source_arn,
+            import_mode=import_mode,
+        )
+        return {
+            "status": "created",
+            "dataset_id": dataset_id,
+            "name": name,
+            "import_mode": import_mode,
+            "note": (
+                "Dataset created. If import_mode is SPICE, call "
+                "refresh_dataset to load data."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def update_dataset_definition(dataset_id: str, definition_json: str) -> dict:
         """Update full dataset definition from JSON.
 
@@ -415,48 +268,22 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         Use this for structural changes (adding joins, calculated columns,
         changing column types) that go beyond simple SQL updates.
         """
-        start = time.time()
         client = get_client()
-        try:
-            definition = json.loads(definition_json)
-            client.update_dataset_definition(
-                dataset_id, definition, backup_first=True
-            )
-            get_tracker().record_call(
-                "update_dataset_definition",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "dataset_id": dataset_id,
-                "backup_created": True,
-                "note": (
-                    "Dataset definition updated. If this is a SPICE dataset, "
-                    "call refresh_dataset to reload data."
-                ),
-            }
-        except json.JSONDecodeError as e:
-            get_tracker().record_call(
-                "update_dataset_definition",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": f"Invalid JSON: {e}"}
-        except Exception as e:
-            get_tracker().record_call(
-                "update_dataset_definition",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        definition = json.loads(definition_json)
+        client.update_dataset_definition(
+            dataset_id, definition, backup_first=True
+        )
+        return {
+            "status": "success",
+            "dataset_id": dataset_id,
+            "backup_created": True,
+            "note": (
+                "Dataset definition updated. If this is a SPICE dataset, "
+                "call refresh_dataset to reload data."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def cancel_refresh(dataset_id: str, ingestion_id: str) -> dict:
         """Cancel a running SPICE dataset refresh.
 
@@ -468,33 +295,16 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
             ingestion_id: The ingestion ID to cancel (from refresh_dataset
                           or list_recent_refreshes).
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.cancel_refresh(dataset_id, ingestion_id)
-            get_tracker().record_call(
-                "cancel_refresh",
-                {"dataset_id": dataset_id, "ingestion_id": ingestion_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "cancelled",
-                "dataset_id": dataset_id,
-                "ingestion_id": ingestion_id,
-                "note": "Ingestion cancelled. You can now trigger a new refresh.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "cancel_refresh",
-                {"dataset_id": dataset_id, "ingestion_id": ingestion_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.cancel_refresh(dataset_id, ingestion_id)
+        return {
+            "status": "cancelled",
+            "dataset_id": dataset_id,
+            "ingestion_id": ingestion_id,
+            "note": "Ingestion cancelled. You can now trigger a new refresh.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def modify_dataset_sql(dataset_id: str, find: str, replace: str) -> dict:
         """Find and replace text in a dataset's SQL query.
 
@@ -509,35 +319,18 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
         Raises an error if the find text is not present in the current SQL.
         After modifying a SPICE dataset, call refresh_dataset to reload data.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.modify_dataset_sql(
-                dataset_id, find, replace, backup_first=True
-            )
-            get_tracker().record_call(
-                "modify_dataset_sql",
-                {"dataset_id": dataset_id, "find_len": len(find)},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "dataset_id": dataset_id,
-                "backup_created": True,
-                "find": find[:100] + ("..." if len(find) > 100 else ""),
-                "replace": replace[:100] + ("..." if len(replace) > 100 else ""),
-                "note": (
-                    "SQL updated. If this is a SPICE dataset, call "
-                    "refresh_dataset to reload data."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "modify_dataset_sql",
-                {"dataset_id": dataset_id, "find_len": len(find)},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.modify_dataset_sql(
+            dataset_id, find, replace, backup_first=True
+        )
+        return {
+            "status": "success",
+            "dataset_id": dataset_id,
+            "backup_created": True,
+            "find": find[:100] + ("..." if len(find) > 100 else ""),
+            "replace": replace[:100] + ("..." if len(replace) > 100 else ""),
+            "note": (
+                "SQL updated. If this is a SPICE dataset, call "
+                "refresh_dataset to reload data."
+            ),
+        }

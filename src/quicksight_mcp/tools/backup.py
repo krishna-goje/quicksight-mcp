@@ -6,11 +6,12 @@ analyses and datasets. Backups are saved as JSON files to
 """
 
 import os
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
+
+from quicksight_mcp.tools._decorator import qs_tool
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +19,11 @@ DEFAULT_BACKUP_DIR = os.path.expanduser("~/.quicksight-mcp/backups")
 
 
 def register_backup_tools(
-    mcp: FastMCP, get_client: Callable, get_tracker: Callable
+    mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None
 ):
     """Register all backup-related MCP tools."""
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def backup_analysis(analysis_id: str) -> dict:
         """Save a full backup of a QuickSight analysis definition to disk.
 
@@ -37,37 +38,20 @@ def register_backup_tools(
 
         Returns the file path of the created backup.
         """
-        start = time.time()
         client = get_client()
-        try:
-            os.makedirs(DEFAULT_BACKUP_DIR, exist_ok=True)
-            filepath = client.backup_analysis(analysis_id, DEFAULT_BACKUP_DIR)
-            get_tracker().record_call(
-                "backup_analysis",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "backup_file": filepath,
-                "note": (
-                    "Backup saved. Use restore_analysis with this file "
-                    "path to restore if needed."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "backup_analysis",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        os.makedirs(DEFAULT_BACKUP_DIR, exist_ok=True)
+        filepath = client.backup_analysis(analysis_id, DEFAULT_BACKUP_DIR)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "backup_file": filepath,
+            "note": (
+                "Backup saved. Use restore_analysis with this file "
+                "path to restore if needed."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def backup_dataset(dataset_id: str) -> dict:
         """Save a full backup of a QuickSight dataset configuration to disk.
 
@@ -81,34 +65,17 @@ def register_backup_tools(
 
         Returns the file path of the created backup.
         """
-        start = time.time()
         client = get_client()
-        try:
-            os.makedirs(DEFAULT_BACKUP_DIR, exist_ok=True)
-            filepath = client.backup_dataset(dataset_id, DEFAULT_BACKUP_DIR)
-            get_tracker().record_call(
-                "backup_dataset",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "dataset_id": dataset_id,
-                "backup_file": filepath,
-                "note": "Dataset backup saved.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "backup_dataset",
-                {"dataset_id": dataset_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        os.makedirs(DEFAULT_BACKUP_DIR, exist_ok=True)
+        filepath = client.backup_dataset(dataset_id, DEFAULT_BACKUP_DIR)
+        return {
+            "status": "success",
+            "dataset_id": dataset_id,
+            "backup_file": filepath,
+            "note": "Dataset backup saved.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def restore_analysis(backup_file: str, analysis_id: str = "") -> dict:
         """Restore a QuickSight analysis from a JSON backup file.
 
@@ -124,38 +91,21 @@ def register_backup_tools(
 
         Returns the restored analysis ID and status.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.restore_analysis_from_backup(
-                backup_file, analysis_id=analysis_id or None
-            )
-            get_tracker().record_call(
-                "restore_analysis",
-                {"backup_file": backup_file, "analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "restored",
-                "backup_file": backup_file,
-                "analysis_id": result.get("analysis_id", analysis_id),
-                "note": (
-                    "Analysis restored from backup. Works even on FAILED analyses. "
-                    "Use describe_analysis to verify the structure."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "restore_analysis",
-                {"backup_file": backup_file, "analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        result = client.restore_analysis_from_backup(
+            backup_file, analysis_id=analysis_id or None
+        )
+        return {
+            "status": "restored",
+            "backup_file": backup_file,
+            "analysis_id": result.get("analysis_id", analysis_id),
+            "note": (
+                "Analysis restored from backup. Works even on FAILED analyses. "
+                "Use describe_analysis to verify the structure."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def clone_analysis(source_analysis_id: str, new_name: str) -> dict:
         """Clone a QuickSight analysis for safe experimentation.
 
@@ -175,39 +125,15 @@ def register_backup_tools(
             new_name: Name for the cloned analysis.
                       Example: "WBR Weekly - Test Copy"
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.clone_analysis(source_analysis_id, new_name)
-            get_tracker().record_call(
-                "clone_analysis",
-                {
-                    "source_analysis_id": source_analysis_id,
-                    "new_name": new_name,
-                },
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "cloned",
-                "source_analysis_id": source_analysis_id,
-                "new_analysis_id": result.get("analysis_id"),
-                "new_name": new_name,
-                "note": (
-                    "Clone created. Make changes on the clone, then "
-                    "publish_dashboard when ready."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "clone_analysis",
-                {
-                    "source_analysis_id": source_analysis_id,
-                    "new_name": new_name,
-                },
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
-
+        result = client.clone_analysis(source_analysis_id, new_name)
+        return {
+            "status": "cloned",
+            "source_analysis_id": source_analysis_id,
+            "new_analysis_id": result.get("analysis_id"),
+            "new_name": new_name,
+            "note": (
+                "Clone created. Make changes on the clone, then "
+                "publish_dashboard when ready."
+            ),
+        }

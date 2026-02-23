@@ -4,19 +4,20 @@ Provides tools for adding, deleting, renaming sheets and listing
 visuals within a specific sheet.
 """
 
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
 
+from quicksight_mcp.tools._decorator import qs_tool
+
 logger = logging.getLogger(__name__)
 
 
-def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable):
+def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None):
     """Register all sheet-related MCP tools."""
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def add_sheet(analysis_id: str, name: str) -> dict:
         """Add a new sheet to a QuickSight analysis.
 
@@ -29,37 +30,20 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
 
         Returns the new sheet ID and confirmation.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.add_sheet(analysis_id, name)
-            get_tracker().record_call(
-                "add_sheet",
-                {"analysis_id": analysis_id, "name": name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "sheet_id": result.get("sheet_id"),
-                "sheet_name": name,
-                "note": (
-                    "Sheet created. Use add_visual to populate it. "
-                    "Use set_visual_layout to arrange visuals."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "add_sheet",
-                {"analysis_id": analysis_id, "name": name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        result = client.add_sheet(analysis_id, name)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "sheet_id": result.get("sheet_id"),
+            "sheet_name": name,
+            "note": (
+                "Sheet created. Use add_visual to populate it. "
+                "Use set_visual_layout to arrange visuals."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def delete_sheet(analysis_id: str, sheet_id: str) -> dict:
         """Delete a sheet from a QuickSight analysis.
 
@@ -70,33 +54,16 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
             analysis_id: The QuickSight analysis ID.
             sheet_id: The ID of the sheet to delete.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.delete_sheet(analysis_id, sheet_id)
-            get_tracker().record_call(
-                "delete_sheet",
-                {"analysis_id": analysis_id, "sheet_id": sheet_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "deleted_sheet_id": sheet_id,
-                "note": "Sheet deleted. Use backup_analysis to restore if needed.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "delete_sheet",
-                {"analysis_id": analysis_id, "sheet_id": sheet_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.delete_sheet(analysis_id, sheet_id)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "deleted_sheet_id": sheet_id,
+            "note": "Sheet deleted. Use backup_analysis to restore if needed.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def rename_sheet(analysis_id: str, sheet_id: str, new_name: str) -> dict:
         """Rename an existing sheet in a QuickSight analysis.
 
@@ -108,33 +75,16 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
             sheet_id: The ID of the sheet to rename.
             new_name: The new display name for the sheet.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.rename_sheet(analysis_id, sheet_id, new_name)
-            get_tracker().record_call(
-                "rename_sheet",
-                {"analysis_id": analysis_id, "sheet_id": sheet_id, "new_name": new_name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "sheet_id": sheet_id,
-                "new_name": new_name,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "rename_sheet",
-                {"analysis_id": analysis_id, "sheet_id": sheet_id, "new_name": new_name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.rename_sheet(analysis_id, sheet_id, new_name)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "sheet_id": sheet_id,
+            "new_name": new_name,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def list_sheet_visuals(analysis_id: str, sheet_id: str) -> dict:
         """List all visuals in a specific sheet of a QuickSight analysis.
 
@@ -144,33 +94,16 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
 
         Returns visual IDs, types, and titles for every visual on the sheet.
         """
-        start = time.time()
         client = get_client()
-        try:
-            visuals = client.list_sheet_visuals(analysis_id, sheet_id)
-            get_tracker().record_call(
-                "list_sheet_visuals",
-                {"analysis_id": analysis_id, "sheet_id": sheet_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "analysis_id": analysis_id,
-                "sheet_id": sheet_id,
-                "count": len(visuals),
-                "visuals": visuals,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "list_sheet_visuals",
-                {"analysis_id": analysis_id, "sheet_id": sheet_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        visuals = client.list_sheet_visuals(analysis_id, sheet_id)
+        return {
+            "analysis_id": analysis_id,
+            "sheet_id": sheet_id,
+            "count": len(visuals),
+            "visuals": visuals,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def replicate_sheet(
         analysis_id: str, source_sheet_id: str, target_sheet_name: str
     ) -> dict:
@@ -193,45 +126,21 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
 
         Returns the new sheet ID, visual count, and visual types.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.replicate_sheet(
-                analysis_id, source_sheet_id, target_sheet_name
-            )
-            get_tracker().record_call(
-                "replicate_sheet",
-                {
-                    "analysis_id": analysis_id,
-                    "source_sheet_id": source_sheet_id,
-                    "target_sheet_name": target_sheet_name,
-                },
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                **result,
-                "note": (
-                    f"Sheet replicated with {result['visual_count']} visuals. "
-                    "Visual IDs are prefixed with 'rc_'. "
-                    "Use set_visual_title or set_visual_layout to customize."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "replicate_sheet",
-                {
-                    "analysis_id": analysis_id,
-                    "source_sheet_id": source_sheet_id,
-                },
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        result = client.replicate_sheet(
+            analysis_id, source_sheet_id, target_sheet_name
+        )
+        return {
+            "status": "success",
+            **result,
+            "note": (
+                f"Sheet replicated with {result['visual_count']} visuals. "
+                "Visual IDs are prefixed with 'rc_'. "
+                "Use set_visual_title or set_visual_layout to customize."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def delete_empty_sheets(analysis_id: str, name_contains: str = "") -> dict:
         """Delete all empty sheets (0 visuals) from an analysis.
 
@@ -246,37 +155,20 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
                 contains this text (case-insensitive). Leave empty to
                 delete ALL empty sheets.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.delete_empty_sheets(
-                analysis_id,
-                name_contains=name_contains or None,
-            )
-            get_tracker().record_call(
-                "delete_empty_sheets",
-                {"analysis_id": analysis_id, "name_contains": name_contains},
-                (time.time() - start) * 1000,
-                True,
-            )
-            if not result['deleted_sheets']:
-                return {
-                    "status": "no_change",
-                    "analysis_id": analysis_id,
-                    "note": "No empty sheets found matching criteria.",
-                }
+        result = client.delete_empty_sheets(
+            analysis_id,
+            name_contains=name_contains or None,
+        )
+        if not result['deleted_sheets']:
             return {
-                "status": "success",
+                "status": "no_change",
                 "analysis_id": analysis_id,
-                **result,
-                "note": f"Deleted {len(result['deleted_sheets'])} empty sheets.",
+                "note": "No empty sheets found matching criteria.",
             }
-        except Exception as e:
-            get_tracker().record_call(
-                "delete_empty_sheets",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            **result,
+            "note": f"Deleted {len(result['deleted_sheets'])} empty sheets.",
+        }

@@ -67,6 +67,22 @@ class Settings:
     memory_max_entries: int = 1000
     memory_max_file_bytes: int = 5 * 1024 * 1024  # 5 MB
 
+    # Logging
+    log_dir: str = field(
+        default_factory=lambda: os.environ.get(
+            "QUICKSIGHT_MCP_LOG_DIR",
+            os.path.expanduser("~/.quicksight-mcp/logs"),
+        )
+    )
+    log_level: str = field(
+        default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO")
+    )
+
+    # Brain (self-improvement)
+    brain_analyze_interval: int = 50  # analyze every N tool calls
+    brain_max_call_log: int = 2000
+    brain_max_knowledge: int = 5000
+
     # Safety
     verify_by_default: bool = True
     optimistic_locking_by_default: bool = True
@@ -84,5 +100,5 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         """Create required directories if they don't exist."""
-        for d in (self.backup_dir, self.learning_dir, self.memory_dir):
+        for d in (self.backup_dir, self.learning_dir, self.memory_dir, self.log_dir):
             Path(d).mkdir(parents=True, exist_ok=True)
