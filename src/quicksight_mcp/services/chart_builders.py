@@ -27,7 +27,7 @@ class ChartBuilderService:
     1. Fetches the current analysis definition (with optimistic-locking version).
     2. Builds the visual definition dict.
     3. Appends the visual + layout element to the target sheet.
-    4. Calls ``analysis_service.update()`` to persist the change.
+    4. Calls ``analysis_service.update_analysis()`` to persist the change.
     5. Optionally verifies the visual was persisted.
 
     Args:
@@ -42,8 +42,6 @@ class ChartBuilderService:
         cache: TTLCache,
         analysis_service: AnalysisService,
     ) -> None:
-        self._aws = aws
-        self._cache = cache
         self._analysis = analysis_service
 
     # ------------------------------------------------------------------
@@ -368,7 +366,7 @@ class ChartBuilderService:
             col_span=12, row_span=6,
         )
 
-        result = self._analysis.update(
+        result = self._analysis.update_analysis(
             analysis_id,
             definition,
             backup_first=backup_first,
@@ -451,7 +449,7 @@ class ChartBuilderService:
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
 
-        result = self._analysis.update(
+        result = self._analysis.update_analysis(
             analysis_id,
             definition,
             backup_first=backup_first,
@@ -534,7 +532,7 @@ class ChartBuilderService:
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
 
-        result = self._analysis.update(
+        result = self._analysis.update_analysis(
             analysis_id,
             definition,
             backup_first=backup_first,
@@ -609,7 +607,7 @@ class ChartBuilderService:
             definition, sheet_id, visual_def, visual_id, row_span=16
         )
 
-        result = self._analysis.update(
+        result = self._analysis.update_analysis(
             analysis_id,
             definition,
             backup_first=backup_first,
@@ -672,7 +670,7 @@ class ChartBuilderService:
             definition, sheet_id, visual_def, visual_id, row_span=16
         )
 
-        result = self._analysis.update(
+        result = self._analysis.update_analysis(
             analysis_id,
             definition,
             backup_first=backup_first,
@@ -766,7 +764,7 @@ class ChartBuilderService:
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
 
-        result = self._analysis.update(
+        result = self._analysis.update_analysis(
             analysis_id,
             definition,
             backup_first=backup_first,
@@ -835,7 +833,7 @@ class ChartBuilderService:
 
         self._append_visual_to_sheet(definition, sheet_id, visual_def, visual_id)
 
-        result = self._analysis.update(
+        result = self._analysis.update_analysis(
             analysis_id,
             definition,
             backup_first=backup_first,

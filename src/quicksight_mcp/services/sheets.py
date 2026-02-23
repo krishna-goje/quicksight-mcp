@@ -101,12 +101,12 @@ class SheetService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if self._analyses.should_verify(verify):
+        if self._analyses._should_verify(verify):
             self._verify_sheet_exists(analysis_id, new_sheet_id, name)
 
         result["sheet_id"] = new_sheet_id
@@ -148,12 +148,12 @@ class SheetService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if self._analyses.should_verify(verify):
+        if self._analyses._should_verify(verify):
             self._verify_sheet_deleted(analysis_id, sheet_id)
 
         if fg_removed:
@@ -198,12 +198,12 @@ class SheetService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if self._analyses.should_verify(verify):
+        if self._analyses._should_verify(verify):
             self._verify_sheet_exists(analysis_id, sheet_id, new_name)
 
         return result
@@ -334,12 +334,12 @@ class SheetService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(None)
+                if self._analyses._should_lock(None)
                 else None
             ),
         )
 
-        if self._analyses.should_verify(verify):
+        if self._analyses._should_verify(verify):
             self._verify_sheet_exists(
                 analysis_id, new_sheet_id, target_sheet_name
             )
@@ -411,7 +411,7 @@ class SheetService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(None)
+                if self._analyses._should_lock(None)
                 else None
             ),
         )
@@ -442,7 +442,7 @@ class SheetService:
         expected_name: Optional[str] = None,
     ) -> bool:
         """Verify a sheet exists after creation/rename."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         definition = self._analyses.get_definition(analysis_id)
         for s in definition.get("Sheets", []):
             if s.get("SheetId") == sheet_id:
@@ -464,7 +464,7 @@ class SheetService:
         self, analysis_id: str, sheet_id: str
     ) -> bool:
         """Verify a sheet was actually deleted."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         definition = self._analyses.get_definition(analysis_id)
         for s in definition.get("Sheets", []):
             if s.get("SheetId") == sheet_id:
@@ -482,7 +482,7 @@ class SheetService:
         expected_count: int,
     ) -> bool:
         """Verify a sheet has the expected number of visuals."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         definition = self._analyses.get_definition(analysis_id)
         for s in definition.get("Sheets", []):
             if s.get("SheetId") == sheet_id:

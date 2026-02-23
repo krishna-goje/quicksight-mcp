@@ -73,10 +73,11 @@ class SnapshotService:
             ``filter_group_count``, and ``snapshot_file``.
         """
         self._analysis.clear_def_cache(analysis_id)
-        analysis = self._analysis.get_analysis(analysis_id)
+        analysis = self._analysis.get(analysis_id)
         definition = self._analysis.get_definition(analysis_id)
 
-        snapshot_id = f"snap_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        now = datetime.now()
+        snapshot_id = f"snap_{now.strftime('%Y%m%d_%H%M%S')}"
 
         sheets: List[Dict] = []
         visuals: List[Dict] = []
@@ -106,7 +107,7 @@ class SnapshotService:
             "snapshot_id": snapshot_id,
             "analysis_id": analysis_id,
             "analysis_name": analysis.get("Name", ""),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now.isoformat(),
             "status": analysis.get("Status", ""),
             "sheets": sheets,
             "visuals": visuals,
@@ -118,7 +119,7 @@ class SnapshotService:
         # Persist to disk
         snap_dir = self._snapshot_dir()
         snap_file = os.path.join(snap_dir, f"{snapshot_id}.json")
-        with open(snap_file, "w") as f:
+        with open(snap_file, "w", encoding="utf-8") as f:
             json.dump(snapshot, f, indent=2, default=str)
 
         snapshot["snapshot_file"] = snap_file
@@ -150,7 +151,7 @@ class SnapshotService:
         if not os.path.isfile(snap_file):
             raise ValueError(f"Snapshot '{snapshot_id}' not found at {snap_file}")
 
-        with open(snap_file) as f:
+        with open(snap_file, encoding="utf-8") as f:
             old_snapshot = json.load(f)
 
         # Capture current state

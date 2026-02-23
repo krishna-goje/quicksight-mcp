@@ -96,7 +96,7 @@ class MemoryStore:
         """Load from disk if file exists."""
         if self._path.exists():
             try:
-                with open(self._path) as f:
+                with open(self._path, encoding="utf-8") as f:
                     raw = json.load(f)
                 # Handle both old format (flat dict) and new format (with metadata)
                 if isinstance(raw, dict):
@@ -119,6 +119,7 @@ class MemoryStore:
     def _save(self) -> None:
         """Atomic write to disk."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(
                 dir=str(self._path.parent),
@@ -131,10 +132,11 @@ class MemoryStore:
         except Exception as e:
             logger.warning("Failed to save memory to %s: %s", self._path, e)
             # Clean up temp file if rename failed
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
 
     def _evict_if_needed(self) -> None:
         """Evict oldest 20% of entries when at capacity."""

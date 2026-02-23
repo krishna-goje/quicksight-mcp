@@ -121,6 +121,16 @@ class AnalysisService:
         definition = self.get_definition(analysis_id)
         return definition, analysis.get("LastUpdatedTime")
 
+    def get_permissions(self, analysis_id: str) -> List[Dict]:
+        """Get analysis permissions (for cloning)."""
+        self._aws.ensure_account_id()
+        response = self._aws.call(
+            "describe_analysis_permissions",
+            AwsAccountId=self._aws.account_id,
+            AnalysisId=analysis_id,
+        )
+        return response.get("Permissions", [])
+
     def clear_def_cache(self, analysis_id: Optional[str] = None) -> None:
         """Clear cached analysis definition(s).
 
@@ -553,7 +563,7 @@ class AnalysisService:
         Raises:
             DestructiveChangeError: When the update is considered destructive.
         """
-        current_def = self.get_definition(analysis_id, use_cache=True)
+        current_def = self.get_definition(analysis_id, use_cache=False)
 
         current_sheets = current_def.get("Sheets", [])
         cur_sheet_cnt = len(current_sheets)

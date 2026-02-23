@@ -170,10 +170,31 @@ def _truncate_response(result: Any, tool_name: str) -> Any:
     if len(serialized) <= CHARACTER_LIMIT:
         return result
 
-    # Add truncation notice
-    result["_truncated"] = True
-    result["_note"] = (
+    # Actually truncate: try removing list items from the largest list value
+    # until we're under the limit, then add truncation metadata
+    truncated = dict(result)
+    for key in sorted(
+        truncated.keys(),
+        key=lambda k: len(json.dumps(truncated[k], default=str))
+        if isinstance(truncated[k], (list, dict))
+        else 0,
+        reverse=True,
+    ):
+        val = truncated[key]
+        if isinstance(val, list) and len(val) > 1:
+            # Keep only enough items to stay under limit
+            while len(val) > 1:
+                val = val[: len(val) // 2]
+                truncated[key] = val
+                check = json.dumps(truncated, default=str)
+                if len(check) <= CHARACTER_LIMIT - 200:
+                    break
+            if len(json.dumps(truncated, default=str)) <= CHARACTER_LIMIT:
+                break
+
+    truncated["_truncated"] = True
+    truncated["_note"] = (
         f"Response exceeded {CHARACTER_LIMIT} characters and was truncated. "
         f"Use more specific queries or limit/offset parameters."
     )
-    return result
+    return truncated

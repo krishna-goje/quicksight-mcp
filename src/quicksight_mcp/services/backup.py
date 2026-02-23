@@ -160,7 +160,7 @@ class BackupService:
         """
         bdir = self._ensure_backup_dir(backup_dir)
 
-        analysis = self._analysis.get_analysis(analysis_id)
+        analysis = self._analysis.get(analysis_id)
         definition = self._analysis.get_definition(analysis_id)
 
         name = self._sanitize_name(analysis.get("Name", analysis_id))
@@ -199,7 +199,7 @@ class BackupService:
         """
         real_path = self._validate_restore_path(backup_file)
 
-        with open(real_path) as f:
+        with open(real_path, encoding="utf-8") as f:
             backup_data = json.load(f)
 
         target_id = analysis_id or backup_data.get("analysis", {}).get("AnalysisId")
@@ -229,7 +229,7 @@ class BackupService:
         """
         real_path = self._validate_restore_path(backup_file)
 
-        with open(real_path) as f:
+        with open(real_path, encoding="utf-8") as f:
             backup_data = json.load(f)
 
         target_id = dataset_id or backup_data.get("DataSetId")
@@ -294,7 +294,7 @@ class BackupService:
         """
         real_path = self._validate_restore_path(backup_file)
 
-        with open(real_path) as f:
+        with open(real_path, encoding="utf-8") as f:
             backup_data = json.load(f)
 
         # Handle both Definition (capital) and definition (lower) key casing
@@ -311,7 +311,7 @@ class BackupService:
             )
 
         # Force update — calls AWS directly to bypass FAILED status check
-        analysis = self._analysis.get_analysis(analysis_id)
+        analysis = self._analysis.get(analysis_id)
         acct = self._aws.ensure_account_id()
         self._aws.call(
             "update_analysis",
@@ -327,7 +327,7 @@ class BackupService:
         start = time.time()
         while time.time() - start < timeout:
             time.sleep(poll_interval)
-            refreshed = self._analysis.get_analysis(analysis_id)
+            refreshed = self._analysis.get(analysis_id)
             status = refreshed.get("Status", "")
             if "SUCCESSFUL" in status:
                 self._analysis.clear_def_cache(analysis_id)

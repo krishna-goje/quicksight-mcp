@@ -11,6 +11,16 @@ Architecture:
 
 __version__ = "1.0.0"
 
+__all__ = [
+    "__version__",
+    "QuickSightClient",
+    "ChangeVerificationError",
+    "ConcurrentModificationError",
+    "DestructiveChangeError",
+    "Settings",
+    "QSError",
+]
+
 # Backward-compatible re-exports
 from quicksight_mcp.client import QuickSightClient as QuickSightClient
 from quicksight_mcp.exceptions import (

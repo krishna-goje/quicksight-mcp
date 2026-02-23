@@ -149,12 +149,12 @@ class VisualService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if visual_id and self._analyses.should_verify(verify):
+        if visual_id and self._analyses._should_verify(verify):
             self._verify_visual_exists(analysis_id, visual_id)
 
         result["visual_id"] = visual_id
@@ -215,12 +215,12 @@ class VisualService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if self._analyses.should_verify(verify):
+        if self._analyses._should_verify(verify):
             self._verify_visual_deleted(analysis_id, visual_id)
 
         return result
@@ -271,12 +271,12 @@ class VisualService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if self._analyses.should_verify(verify):
+        if self._analyses._should_verify(verify):
             self._verify_visual_title(analysis_id, visual_id, title)
 
         return result
@@ -358,7 +358,7 @@ class VisualService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
@@ -371,7 +371,7 @@ class VisualService:
         self, analysis_id: str, visual_id: str
     ) -> bool:
         """Verify a visual exists after creation."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         if self.get_definition(analysis_id, visual_id) is not None:
             return True
         raise ChangeVerificationError(
@@ -384,7 +384,7 @@ class VisualService:
         self, analysis_id: str, visual_id: str
     ) -> bool:
         """Verify a visual was actually deleted."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         if self.get_definition(analysis_id, visual_id) is not None:
             raise ChangeVerificationError(
                 "delete_visual",
@@ -397,7 +397,7 @@ class VisualService:
         self, analysis_id: str, visual_id: str, expected_title: str
     ) -> bool:
         """Verify a visual's title matches expected value."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         vdef = self.get_definition(analysis_id, visual_id)
         if vdef is None:
             raise ChangeVerificationError(

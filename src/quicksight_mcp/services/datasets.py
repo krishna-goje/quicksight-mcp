@@ -172,10 +172,18 @@ class DatasetService:
 
         # Find and update the CustomSql entry
         physical_map = dataset.get("PhysicalTableMap", {})
+        found_custom_sql = False
         for _table_id, table_def in physical_map.items():
             if "CustomSql" in table_def:
                 table_def["CustomSql"]["SqlQuery"] = new_sql
+                found_custom_sql = True
                 break
+
+        if not found_custom_sql:
+            raise ValueError(
+                f"Dataset {dataset_id} does not use Custom SQL. "
+                f"Cannot update SQL query."
+            )
 
         # Build update payload
         update_params: Dict[str, Any] = {

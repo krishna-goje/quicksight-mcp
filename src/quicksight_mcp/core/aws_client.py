@@ -87,7 +87,11 @@ class AwsClient:
             return self.account_id
         except Exception as e:
             if self._refresh_on_expired(e):
-                return self.account_id  # type: ignore[return-value]
+                if self.account_id is None:
+                    raise RuntimeError(
+                        "Cannot resolve AWS account ID after credential refresh."
+                    )
+                return self.account_id
             raise RuntimeError(
                 "Cannot resolve AWS account ID. Credentials are expired. "
                 "Run: saml2aws login or refresh your AWS credentials."

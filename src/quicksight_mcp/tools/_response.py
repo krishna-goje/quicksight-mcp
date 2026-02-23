@@ -20,6 +20,8 @@ def paginate_list(
     Returns:
         dict with ``items``, ``total_count``, ``has_more``, ``next_offset``.
     """
+    limit = max(1, limit)
+    offset = max(0, offset)
     total = len(items)
     page = items[offset : offset + limit]
     has_more = offset + limit < total
