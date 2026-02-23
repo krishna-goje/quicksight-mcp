@@ -79,7 +79,8 @@ class QSNotFoundError(QSError):
             resource_id=resource_id,
             suggestions=[
                 f"Verify the {resource_type.lower()} ID is correct",
-                f"Use list_{resource_type.lower()}s or search_{resource_type.lower()}s to find valid IDs",
+                f"Use list/search tools to find valid "
+                f"{resource_type.lower()} IDs",
             ],
             metadata={"resource_type": resource_type},
             **kwargs,
