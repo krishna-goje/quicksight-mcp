@@ -3,7 +3,6 @@
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from quicksight_mcp.config import Settings
 from quicksight_mcp.core.cache import TTLCache

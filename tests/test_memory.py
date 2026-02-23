@@ -1,11 +1,8 @@
 """Unit tests for Phase 4 memory system."""
 
 import json
-import os
-import tempfile
 import time
 
-import pytest
 
 from quicksight_mcp.memory.store import MemoryStore
 from quicksight_mcp.memory.manager import (

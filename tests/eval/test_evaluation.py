@@ -9,8 +9,7 @@ For live integration tests, see tests/integration_sprint*.py.
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,7 +17,6 @@ from quicksight_mcp.config import Settings
 from quicksight_mcp.core.cache import TTLCache
 from quicksight_mcp.safety.exceptions import (
     DestructiveChangeError,
-    QSError,
 )
 
 
