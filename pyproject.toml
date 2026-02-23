@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "quicksight-mcp"
-version = "0.2.0"
-description = "The most comprehensive AWS QuickSight MCP server - with self-learning capability"
+version = "1.0.0"
+description = "The most comprehensive AWS QuickSight MCP server — 62 tools with full context memory"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
     "fastmcp>=2.0,<4",
     "boto3>=1.28.0",
+    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]

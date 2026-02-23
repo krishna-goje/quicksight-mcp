@@ -131,8 +131,8 @@ class TestVersionInfo:
         for part in parts:
             assert part.isdigit()
 
-    def test_version_is_0_2_0(self):
-        """Test version is 0.2.0."""
+    def test_version_is_1_0_0(self):
+        """Test version is 1.0.0."""
         from quicksight_mcp import __version__
 
-        assert __version__ == "0.2.0"
+        assert __version__ == "1.0.0"
