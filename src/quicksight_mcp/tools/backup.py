@@ -105,7 +105,7 @@ def register_backup_tools(
             ),
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def clone_analysis(source_analysis_id: str, new_name: str) -> dict:
         """Clone a QuickSight analysis for safe experimentation.
 

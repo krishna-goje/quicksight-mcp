@@ -21,7 +21,7 @@ def register_parameter_tools(
 ):
     """Register all parameter-related MCP tools."""
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def add_parameter(analysis_id: str, parameter_definition: str) -> dict:
         """Add a parameter to a QuickSight analysis.
 

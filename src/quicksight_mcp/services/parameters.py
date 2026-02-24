@@ -90,12 +90,12 @@ class ParameterService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if new_name and self._analyses.should_verify(verify):
+        if new_name and self._analyses._should_verify(verify):
             self._verify_parameter_exists(analysis_id, new_name)
 
         result["parameter_name"] = new_name
@@ -138,12 +138,12 @@ class ParameterService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if self._analyses.should_verify(verify):
+        if self._analyses._should_verify(verify):
             self._verify_parameter_deleted(analysis_id, parameter_name)
 
         return result
@@ -156,7 +156,7 @@ class ParameterService:
         self, analysis_id: str, param_name: str
     ) -> bool:
         """Verify a parameter exists after creation."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         definition = self._analyses.get_definition(analysis_id)
         for p in definition.get("ParameterDeclarations", []):
             for ptype in PARAMETER_TYPES:
@@ -172,7 +172,7 @@ class ParameterService:
         self, analysis_id: str, param_name: str
     ) -> bool:
         """Verify a parameter was actually deleted."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         definition = self._analyses.get_definition(analysis_id)
         for p in definition.get("ParameterDeclarations", []):
             for ptype in PARAMETER_TYPES:

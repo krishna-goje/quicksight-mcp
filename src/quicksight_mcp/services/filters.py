@@ -84,12 +84,12 @@ class FilterService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if new_id and self._analyses.should_verify(verify):
+        if new_id and self._analyses._should_verify(verify):
             self._verify_filter_group_exists(analysis_id, new_id)
 
         result["filter_group_id"] = new_id
@@ -130,12 +130,12 @@ class FilterService:
             backup_first=backup_first,
             expected_last_updated=(
                 last_updated
-                if self._analyses.should_lock(use_optimistic_locking)
+                if self._analyses._should_lock(use_optimistic_locking)
                 else None
             ),
         )
 
-        if self._analyses.should_verify(verify):
+        if self._analyses._should_verify(verify):
             self._verify_filter_group_deleted(analysis_id, filter_group_id)
 
         return result
@@ -148,7 +148,7 @@ class FilterService:
         self, analysis_id: str, filter_group_id: str
     ) -> bool:
         """Verify a filter group exists after creation."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         definition = self._analyses.get_definition(analysis_id)
         for fg in definition.get("FilterGroups", []):
             if fg.get("FilterGroupId") == filter_group_id:
@@ -163,7 +163,7 @@ class FilterService:
         self, analysis_id: str, filter_group_id: str
     ) -> bool:
         """Verify a filter group was actually deleted."""
-        self._analyses.clear_definition_cache(analysis_id)
+        self._analyses.clear_def_cache(analysis_id)
         definition = self._analyses.get_definition(analysis_id)
         for fg in definition.get("FilterGroups", []):
             if fg.get("FilterGroupId") == filter_group_id:

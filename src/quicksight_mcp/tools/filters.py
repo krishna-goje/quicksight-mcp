@@ -21,7 +21,7 @@ def register_filter_tools(
 ):
     """Register all filter-related MCP tools."""
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def add_filter_group(analysis_id: str, filter_group_definition: str) -> dict:
         """Add a filter group to a QuickSight analysis.
 

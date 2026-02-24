@@ -481,6 +481,13 @@ class MemoryManager:
         self._call_count = 0
 
         if not enabled:
+            self.usage = None
+            self.analyses = None
+            self.errors = None
+            self.preferences = None
+            self.call_log = None
+            self.latency = None
+            self.knowledge = None
             return
 
         storage = Path(storage_dir)

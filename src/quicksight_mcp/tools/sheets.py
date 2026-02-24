@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None):
     """Register all sheet-related MCP tools."""
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def add_sheet(analysis_id: str, name: str) -> dict:
         """Add a new sheet to a QuickSight analysis.
 
@@ -103,7 +103,7 @@ def register_sheet_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callab
             "visuals": visuals,
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def replicate_sheet(
         analysis_id: str, source_sheet_id: str, target_sheet_name: str
     ) -> dict:

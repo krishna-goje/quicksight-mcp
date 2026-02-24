@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "quicksight-mcp"
-version = "1.0.0"
+version = "1.1.0"
 description = "The most comprehensive AWS QuickSight MCP server — 62 tools with full context memory"
 readme = "README.md"
 license = {text = "Apache-2.0"}

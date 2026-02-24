@@ -49,7 +49,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             "definition": visual_def,
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def add_visual(
         analysis_id: str, sheet_id: str, visual_definition: str
     ) -> dict:
@@ -177,7 +177,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
     # Chart Builder Tools (simple-parameter visual creation)
     # ------------------------------------------------------------------
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def create_kpi(
         analysis_id: str, sheet_id: str, title: str,
         column: str, aggregation: str, dataset_identifier: str,
@@ -213,7 +213,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             "note": "KPI created. Use set_visual_layout to reposition.",
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def create_bar_chart(
         analysis_id: str, sheet_id: str, title: str,
         category_column: str, value_column: str, value_aggregation: str,
@@ -246,7 +246,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             "note": "Bar chart created. Use set_visual_layout to reposition.",
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def create_line_chart(
         analysis_id: str, sheet_id: str, title: str,
         date_column: str, value_column: str, value_aggregation: str,
@@ -279,7 +279,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             "note": "Line chart created. Use set_visual_layout to reposition.",
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def create_pivot_table(
         analysis_id: str, sheet_id: str, title: str,
         row_columns: str, value_columns: str, value_aggregations: str,
@@ -313,7 +313,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             "note": "Pivot table created. Use set_visual_layout to reposition.",
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def create_table(
         analysis_id: str, sheet_id: str, title: str,
         columns: str, dataset_identifier: str,
@@ -340,7 +340,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             "note": "Table created. Use set_visual_layout to reposition.",
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def create_combo_chart(
         analysis_id: str, sheet_id: str, title: str,
         category_column: str, bar_column: str, bar_aggregation: str,
@@ -387,7 +387,7 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             "note": "Combo chart created. Use set_visual_layout to reposition.",
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def create_pie_chart(
         analysis_id: str, sheet_id: str, title: str,
         group_column: str, value_column: str, value_aggregation: str,
