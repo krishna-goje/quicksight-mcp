@@ -148,7 +148,7 @@ def register_dataset_tools(mcp: FastMCP, get_client: Callable, get_tracker: Call
             ),
         }
 
-    @qs_tool(mcp, get_memory, idempotent=True)
+    @qs_tool(mcp, get_memory)
     def refresh_dataset(dataset_id: str) -> dict:
         """Trigger a SPICE refresh (data reload) for a dataset.
 
