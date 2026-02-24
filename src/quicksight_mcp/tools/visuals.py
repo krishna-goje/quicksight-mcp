@@ -5,19 +5,20 @@ managing their layout and titles within analyses.
 """
 
 import json
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
 
+from quicksight_mcp.tools._decorator import qs_tool
+
 logger = logging.getLogger(__name__)
 
 
-def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable):
+def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None):
     """Register all visual-related MCP tools."""
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_visual_definition(analysis_id: str, visual_id: str) -> dict:
         """Get the full raw definition of a specific visual.
 
@@ -32,40 +33,23 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
 
         Returns the complete visual definition dict, or indicates not found.
         """
-        start = time.time()
         client = get_client()
-        try:
-            visual_def = client.get_visual_definition(analysis_id, visual_id)
-            get_tracker().record_call(
-                "get_visual_definition",
-                {"analysis_id": analysis_id, "visual_id": visual_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            if visual_def is None:
-                return {
-                    "analysis_id": analysis_id,
-                    "visual_id": visual_id,
-                    "found": False,
-                    "note": "Visual not found. Use list_visuals to see available visuals.",
-                }
+        visual_def = client.get_visual_definition(analysis_id, visual_id)
+        if visual_def is None:
             return {
                 "analysis_id": analysis_id,
                 "visual_id": visual_id,
-                "found": True,
-                "definition": visual_def,
+                "found": False,
+                "note": "Visual not found. Use list_visuals to see available visuals.",
             }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_visual_definition",
-                {"analysis_id": analysis_id, "visual_id": visual_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        return {
+            "analysis_id": analysis_id,
+            "visual_id": visual_id,
+            "found": True,
+            "definition": visual_def,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def add_visual(
         analysis_id: str, sheet_id: str, visual_definition: str
     ) -> dict:
@@ -84,43 +68,23 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
 
         Returns confirmation with the visual ID.
         """
-        start = time.time()
         client = get_client()
-        try:
-            try:
-                parsed_def = json.loads(visual_definition) if isinstance(visual_definition, str) else visual_definition
-            except json.JSONDecodeError as je:
-                return {"error": f"Invalid JSON in visual_definition: {je}"}
-            result = client.add_visual_to_sheet(
-                analysis_id, sheet_id, parsed_def
-            )
-            get_tracker().record_call(
-                "add_visual",
-                {"analysis_id": analysis_id, "sheet_id": sheet_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "sheet_id": sheet_id,
-                "visual_id": result.get("visual_id"),
-                "note": (
-                    "Visual added. Use set_visual_layout to position it. "
-                    "Use set_visual_title to set the display title."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "add_visual",
-                {"analysis_id": analysis_id, "sheet_id": sheet_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        parsed_def = json.loads(visual_definition) if isinstance(visual_definition, str) else visual_definition
+        result = client.add_visual_to_sheet(
+            analysis_id, sheet_id, parsed_def
+        )
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "sheet_id": sheet_id,
+            "visual_id": result.get("visual_id"),
+            "note": (
+                "Visual added. Use set_visual_layout to position it. "
+                "Use set_visual_title to set the display title."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def delete_visual(analysis_id: str, visual_id: str) -> dict:
         """Delete a visual from a QuickSight analysis.
 
@@ -131,33 +95,16 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             analysis_id: The QuickSight analysis ID.
             visual_id: The ID of the visual to delete.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.delete_visual(analysis_id, visual_id)
-            get_tracker().record_call(
-                "delete_visual",
-                {"analysis_id": analysis_id, "visual_id": visual_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "deleted_visual_id": visual_id,
-                "note": "Visual deleted. Use backup_analysis to restore if needed.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "delete_visual",
-                {"analysis_id": analysis_id, "visual_id": visual_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.delete_visual(analysis_id, visual_id)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "deleted_visual_id": visual_id,
+            "note": "Visual deleted. Use backup_analysis to restore if needed.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def set_visual_title(analysis_id: str, visual_id: str, title: str) -> dict:
         """Set or update the title of a visual.
 
@@ -169,33 +116,16 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             visual_id: The visual ID to update.
             title: The new display title for the visual.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.set_visual_title(analysis_id, visual_id, title)
-            get_tracker().record_call(
-                "set_visual_title",
-                {"analysis_id": analysis_id, "visual_id": visual_id, "title": title},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "visual_id": visual_id,
-                "title": title,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "set_visual_title",
-                {"analysis_id": analysis_id, "visual_id": visual_id, "title": title},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.set_visual_title(analysis_id, visual_id, title)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "visual_id": visual_id,
+            "title": title,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, idempotent=True)
     def set_visual_layout(
         analysis_id: str,
         visual_id: str,
@@ -223,55 +153,31 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             row_index: Row position (0-based).
             row_span: Height in rows.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.set_visual_layout(
-                analysis_id, visual_id,
-                column_index=column_index,
-                column_span=column_span,
-                row_index=row_index,
-                row_span=row_span,
-            )
-            get_tracker().record_call(
-                "set_visual_layout",
-                {
-                    "analysis_id": analysis_id,
-                    "visual_id": visual_id,
-                    "column_index": column_index,
-                    "column_span": column_span,
-                    "row_index": row_index,
-                    "row_span": row_span,
-                },
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "visual_id": visual_id,
-                "layout": {
-                    "column_index": column_index,
-                    "column_span": column_span,
-                    "row_index": row_index,
-                    "row_span": row_span,
-                },
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "set_visual_layout",
-                {"analysis_id": analysis_id, "visual_id": visual_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.set_visual_layout(
+            analysis_id, visual_id,
+            column_index=column_index,
+            column_span=column_span,
+            row_index=row_index,
+            row_span=row_span,
+        )
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "visual_id": visual_id,
+            "layout": {
+                "column_index": column_index,
+                "column_span": column_span,
+                "row_index": row_index,
+                "row_span": row_span,
+            },
+        }
 
     # ------------------------------------------------------------------
     # Chart Builder Tools (simple-parameter visual creation)
     # ------------------------------------------------------------------
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def create_kpi(
         analysis_id: str, sheet_id: str, title: str,
         column: str, aggregation: str, dataset_identifier: str,
@@ -293,38 +199,21 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
                   {"condition": "< 50", "color": "#DE3B00"}]'
                 Leave empty for no conditional formatting.
         """
-        start = time.time()
         client = get_client()
-        try:
-            try:
-                cf = json.loads(conditional_format) if conditional_format else None
-            except json.JSONDecodeError as je:
-                return {"error": f"Invalid JSON in conditional_format: {je}"}
-            result = client.create_kpi(
-                analysis_id, sheet_id, title, column, aggregation, dataset_identifier,
-                format_string=format_string or None,
-                conditional_format=cf,
-            )
-            get_tracker().record_call(
-                "create_kpi",
-                {"analysis_id": analysis_id, "title": title},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "visual_id": result.get("visual_id"),
-                "title": title,
-                "note": "KPI created. Use set_visual_layout to reposition.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "create_kpi", {"analysis_id": analysis_id},
-                (time.time() - start) * 1000, False, str(e),
-            )
-            return {"error": str(e)}
+        cf = json.loads(conditional_format) if conditional_format else None
+        result = client.create_kpi(
+            analysis_id, sheet_id, title, column, aggregation, dataset_identifier,
+            format_string=format_string or None,
+            conditional_format=cf,
+        )
+        return {
+            "status": "success",
+            "visual_id": result.get("visual_id"),
+            "title": title,
+            "note": "KPI created. Use set_visual_layout to reposition.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def create_bar_chart(
         analysis_id: str, sheet_id: str, title: str,
         category_column: str, value_column: str, value_aggregation: str,
@@ -343,35 +232,21 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             dataset_identifier: The dataset identifier.
             orientation: VERTICAL (default) or HORIZONTAL.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.create_bar_chart(
-                analysis_id, sheet_id, title, category_column,
-                value_column, value_aggregation, dataset_identifier, orientation,
-                format_string=format_string or None,
-                show_data_labels=show_data_labels,
-            )
-            get_tracker().record_call(
-                "create_bar_chart",
-                {"analysis_id": analysis_id, "title": title},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "visual_id": result.get("visual_id"),
-                "title": title,
-                "note": "Bar chart created. Use set_visual_layout to reposition.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "create_bar_chart", {"analysis_id": analysis_id},
-                (time.time() - start) * 1000, False, str(e),
-            )
-            return {"error": str(e)}
+        result = client.create_bar_chart(
+            analysis_id, sheet_id, title, category_column,
+            value_column, value_aggregation, dataset_identifier, orientation,
+            format_string=format_string or None,
+            show_data_labels=show_data_labels,
+        )
+        return {
+            "status": "success",
+            "visual_id": result.get("visual_id"),
+            "title": title,
+            "note": "Bar chart created. Use set_visual_layout to reposition.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def create_line_chart(
         analysis_id: str, sheet_id: str, title: str,
         date_column: str, value_column: str, value_aggregation: str,
@@ -390,35 +265,21 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             dataset_identifier: The dataset identifier.
             date_granularity: DAY, WEEK, MONTH, QUARTER, or YEAR.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.create_line_chart(
-                analysis_id, sheet_id, title, date_column,
-                value_column, value_aggregation, dataset_identifier, date_granularity,
-                format_string=format_string or None,
-                show_data_labels=show_data_labels,
-            )
-            get_tracker().record_call(
-                "create_line_chart",
-                {"analysis_id": analysis_id, "title": title},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "visual_id": result.get("visual_id"),
-                "title": title,
-                "note": "Line chart created. Use set_visual_layout to reposition.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "create_line_chart", {"analysis_id": analysis_id},
-                (time.time() - start) * 1000, False, str(e),
-            )
-            return {"error": str(e)}
+        result = client.create_line_chart(
+            analysis_id, sheet_id, title, date_column,
+            value_column, value_aggregation, dataset_identifier, date_granularity,
+            format_string=format_string or None,
+            show_data_labels=show_data_labels,
+        )
+        return {
+            "status": "success",
+            "visual_id": result.get("visual_id"),
+            "title": title,
+            "note": "Line chart created. Use set_visual_layout to reposition.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def create_pivot_table(
         analysis_id: str, sheet_id: str, title: str,
         row_columns: str, value_columns: str, value_aggregations: str,
@@ -438,35 +299,21 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
                 (e.g., "COUNT,SUM").
             dataset_identifier: The dataset identifier.
         """
-        start = time.time()
         client = get_client()
-        try:
-            rows = [c.strip() for c in row_columns.split(',')]
-            vals = [c.strip() for c in value_columns.split(',')]
-            aggs = [a.strip() for a in value_aggregations.split(',')]
-            result = client.create_pivot_table(
-                analysis_id, sheet_id, title, rows, vals, aggs, dataset_identifier
-            )
-            get_tracker().record_call(
-                "create_pivot_table",
-                {"analysis_id": analysis_id, "title": title},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "visual_id": result.get("visual_id"),
-                "title": title,
-                "note": "Pivot table created. Use set_visual_layout to reposition.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "create_pivot_table", {"analysis_id": analysis_id},
-                (time.time() - start) * 1000, False, str(e),
-            )
-            return {"error": str(e)}
+        rows = [c.strip() for c in row_columns.split(',')]
+        vals = [c.strip() for c in value_columns.split(',')]
+        aggs = [a.strip() for a in value_aggregations.split(',')]
+        result = client.create_pivot_table(
+            analysis_id, sheet_id, title, rows, vals, aggs, dataset_identifier
+        )
+        return {
+            "status": "success",
+            "visual_id": result.get("visual_id"),
+            "title": title,
+            "note": "Pivot table created. Use set_visual_layout to reposition.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def create_table(
         analysis_id: str, sheet_id: str, title: str,
         columns: str, dataset_identifier: str,
@@ -481,33 +328,19 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
                 (e.g., "FLIP_TOKEN,MARKET_NAME,PURCHASE_AGREEMENT_COMPLETED_AT").
             dataset_identifier: The dataset identifier.
         """
-        start = time.time()
         client = get_client()
-        try:
-            cols = [c.strip() for c in columns.split(',')]
-            result = client.create_table(
-                analysis_id, sheet_id, title, cols, dataset_identifier
-            )
-            get_tracker().record_call(
-                "create_table",
-                {"analysis_id": analysis_id, "title": title},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "visual_id": result.get("visual_id"),
-                "title": title,
-                "note": "Table created. Use set_visual_layout to reposition.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "create_table", {"analysis_id": analysis_id},
-                (time.time() - start) * 1000, False, str(e),
-            )
-            return {"error": str(e)}
+        cols = [c.strip() for c in columns.split(',')]
+        result = client.create_table(
+            analysis_id, sheet_id, title, cols, dataset_identifier
+        )
+        return {
+            "status": "success",
+            "visual_id": result.get("visual_id"),
+            "title": title,
+            "note": "Table created. Use set_visual_layout to reposition.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def create_combo_chart(
         analysis_id: str, sheet_id: str, title: str,
         category_column: str, bar_column: str, bar_aggregation: str,
@@ -537,38 +370,24 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
                 Leave empty for default formatting.
             show_data_labels: Show value labels on bars and line points.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.create_combo_chart(
-                analysis_id, sheet_id, title, category_column,
-                bar_column, bar_aggregation,
-                line_column, line_aggregation,
-                dataset_identifier,
-                bar_format_string=bar_format_string or None,
-                line_format_string=line_format_string or None,
-                show_data_labels=show_data_labels,
-            )
-            get_tracker().record_call(
-                "create_combo_chart",
-                {"analysis_id": analysis_id, "title": title},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "visual_id": result.get("visual_id"),
-                "title": title,
-                "note": "Combo chart created. Use set_visual_layout to reposition.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "create_combo_chart", {"analysis_id": analysis_id},
-                (time.time() - start) * 1000, False, str(e),
-            )
-            return {"error": str(e)}
+        result = client.create_combo_chart(
+            analysis_id, sheet_id, title, category_column,
+            bar_column, bar_aggregation,
+            line_column, line_aggregation,
+            dataset_identifier,
+            bar_format_string=bar_format_string or None,
+            line_format_string=line_format_string or None,
+            show_data_labels=show_data_labels,
+        )
+        return {
+            "status": "success",
+            "visual_id": result.get("visual_id"),
+            "title": title,
+            "note": "Combo chart created. Use set_visual_layout to reposition.",
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def create_pie_chart(
         analysis_id: str, sheet_id: str, title: str,
         group_column: str, value_column: str, value_aggregation: str,
@@ -587,30 +406,16 @@ def register_visual_tools(mcp: FastMCP, get_client: Callable, get_tracker: Calla
             format_string: Display format (e.g., "#,##0", "$#,##0.00", "0.0%").
                 Leave empty for default formatting.
         """
-        start = time.time()
         client = get_client()
-        try:
-            result = client.create_pie_chart(
-                analysis_id, sheet_id, title,
-                group_column, value_column, value_aggregation,
-                dataset_identifier,
-                format_string=format_string or None,
-            )
-            get_tracker().record_call(
-                "create_pie_chart",
-                {"analysis_id": analysis_id, "title": title},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "visual_id": result.get("visual_id"),
-                "title": title,
-                "note": "Pie chart created. Use set_visual_layout to reposition.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "create_pie_chart", {"analysis_id": analysis_id},
-                (time.time() - start) * 1000, False, str(e),
-            )
-            return {"error": str(e)}
+        result = client.create_pie_chart(
+            analysis_id, sheet_id, title,
+            group_column, value_column, value_aggregation,
+            dataset_identifier,
+            format_string=format_string or None,
+        )
+        return {
+            "status": "success",
+            "visual_id": result.get("visual_id"),
+            "title": title,
+            "note": "Pie chart created. Use set_visual_layout to reposition.",
+        }

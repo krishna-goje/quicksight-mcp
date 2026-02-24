@@ -5,7 +5,7 @@ import os
 
 from quicksight_mcp.learning.tracker import UsageTracker
 from quicksight_mcp.learning.optimizer import Optimizer
-from quicksight_mcp.learning.knowledge import KnowledgeStore
+# KnowledgeStore removed in v1.0 — replaced by memory.MemoryStore
 
 
 class TestUsageTracker:
@@ -206,73 +206,5 @@ class TestOptimizer:
                 assert priorities.index("high") < priorities.index("medium")
 
 
-class TestKnowledgeStore:
-    """Test knowledge storage."""
-
-    def setup_method(self):
-        self.tmpdir = tempfile.mkdtemp()
-        self.store = KnowledgeStore(storage_dir=self.tmpdir)
-
-    def test_get_set(self):
-        """Test basic get/set operations."""
-        self.store.set("test_key", "test_value")
-        assert self.store.get("test_key") == "test_value"
-
-    def test_get_default(self):
-        """Test get with default value for missing key."""
-        assert self.store.get("nonexistent", "default") == "default"
-
-    def test_get_none_default(self):
-        """Test get returns None by default for missing key."""
-        assert self.store.get("nonexistent") is None
-
-    def test_overwrite_value(self):
-        """Test that setting a key twice overwrites the first value."""
-        self.store.set("key", "value1")
-        self.store.set("key", "value2")
-        assert self.store.get("key") == "value2"
-
-    def test_different_value_types(self):
-        """Test storing different value types."""
-        self.store.set("string", "hello")
-        self.store.set("number", 42)
-        self.store.set("list", [1, 2, 3])
-        self.store.set("dict", {"a": 1})
-
-        assert self.store.get("string") == "hello"
-        assert self.store.get("number") == 42
-        assert self.store.get("list") == [1, 2, 3]
-        assert self.store.get("dict") == {"a": 1}
-
-    def test_cache_hints(self):
-        """Test cache hint operations."""
-        self.store.update_cache_hint("dataset", "ds-001", 25)
-        hints = self.store.get_cache_hints()
-        assert "dataset:ds-001" in hints
-        assert hints["dataset:ds-001"]["access_count"] == 25
-
-    def test_cache_hints_multiple(self):
-        """Test multiple cache hints."""
-        self.store.update_cache_hint("dataset", "ds-001", 25)
-        self.store.update_cache_hint("dataset", "ds-002", 10)
-        self.store.update_cache_hint("analysis", "an-001", 5)
-
-        hints = self.store.get_cache_hints()
-        assert len(hints) == 3
-        assert hints["dataset:ds-001"]["access_count"] == 25
-        assert hints["analysis:an-001"]["resource_type"] == "analysis"
-
-    def test_cache_hint_update_overwrites(self):
-        """Test that updating a cache hint overwrites the previous value."""
-        self.store.update_cache_hint("dataset", "ds-001", 10)
-        self.store.update_cache_hint("dataset", "ds-001", 50)
-
-        hints = self.store.get_cache_hints()
-        assert hints["dataset:ds-001"]["access_count"] == 50
-
-    def test_persistence_across_instances(self):
-        """Test that data persists across KnowledgeStore instances."""
-        self.store.set("persistent_key", "persistent_value")
-
-        store2 = KnowledgeStore(storage_dir=self.tmpdir)
-        assert store2.get("persistent_key") == "persistent_value"
+# TestKnowledgeStore removed — KnowledgeStore replaced by memory.MemoryStore in v1.0
+# See tests/test_memory.py for equivalent tests

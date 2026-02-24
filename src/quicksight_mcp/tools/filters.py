@@ -6,21 +6,22 @@ and can be scoped to specific sheets or visuals.
 """
 
 import json
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
 
+from quicksight_mcp.tools._decorator import qs_tool
+
 logger = logging.getLogger(__name__)
 
 
 def register_filter_tools(
-    mcp: FastMCP, get_client: Callable, get_tracker: Callable
+    mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None
 ):
     """Register all filter-related MCP tools."""
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory)
     def add_filter_group(analysis_id: str, filter_group_definition: str) -> dict:
         """Add a filter group to a QuickSight analysis.
 
@@ -48,40 +49,20 @@ def register_filter_tools(
 
         Returns confirmation with the filter group ID.
         """
-        start = time.time()
         client = get_client()
-        try:
-            try:
-                parsed_def = json.loads(filter_group_definition) if isinstance(filter_group_definition, str) else filter_group_definition
-            except json.JSONDecodeError as je:
-                return {"error": f"Invalid JSON in filter_group_definition: {je}"}
-            result = client.add_filter_group(analysis_id, parsed_def)
-            get_tracker().record_call(
-                "add_filter_group",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "filter_group_id": result.get("filter_group_id"),
-                "note": (
-                    "Filter group added. It will apply to the configured "
-                    "scope (sheets/visuals) immediately."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "add_filter_group",
-                {"analysis_id": analysis_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        parsed_def = json.loads(filter_group_definition) if isinstance(filter_group_definition, str) else filter_group_definition
+        result = client.add_filter_group(analysis_id, parsed_def)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "filter_group_id": result.get("filter_group_id"),
+            "note": (
+                "Filter group added. It will apply to the configured "
+                "scope (sheets/visuals) immediately."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def delete_filter_group(analysis_id: str, filter_group_id: str) -> dict:
         """Delete a filter group from a QuickSight analysis.
 
@@ -93,28 +74,11 @@ def register_filter_tools(
             analysis_id: The QuickSight analysis ID.
             filter_group_id: The ID of the filter group to delete.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.delete_filter_group(analysis_id, filter_group_id)
-            get_tracker().record_call(
-                "delete_filter_group",
-                {"analysis_id": analysis_id, "filter_group_id": filter_group_id},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "success",
-                "analysis_id": analysis_id,
-                "deleted_filter_group_id": filter_group_id,
-                "note": "Filter group deleted. Use backup_analysis to restore if needed.",
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "delete_filter_group",
-                {"analysis_id": analysis_id, "filter_group_id": filter_group_id},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.delete_filter_group(analysis_id, filter_group_id)
+        return {
+            "status": "success",
+            "analysis_id": analysis_id,
+            "deleted_filter_group_id": filter_group_id,
+            "note": "Filter group deleted. Use backup_analysis to restore if needed.",
+        }

@@ -1,18 +1,17 @@
-# CodeRabbit configuration
-# Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+# CodeRabbit Configuration — Maximum coverage, staff-level review
+# Catches semantic issues, architecture drift, security, contract violations.
+# Krishna focuses on product decisions — CodeRabbit handles code quality.
 
 language: en-US
 
 reviews:
-  # Auto-review every PR
-  auto_review:
-    enabled: true
-    drafts: false
-
-  # Review profile: assertive catches more issues
+  # ASSERTIVE = maximum feedback, catches subtle issues
   profile: assertive
 
-  # What to include in reviews
+  auto_review:
+    enabled: true
+    drafts: true
+
   request_changes_workflow: true
   high_level_summary: true
   poem: false
@@ -20,29 +19,73 @@ reviews:
   collapse_walkthrough: false
 
   path_instructions:
-    - path: "src/quicksight_mcp/client.py"
-      instructions: |
-        This is the core AWS QuickSight API wrapper. Every write method MUST:
-        1. Call get_analysis_definition_with_version() for optimistic locking
-        2. Call update_analysis() with backup_first=True
-        3. Call a _verify_*() method after success
-        4. Return a structured dict
-        Check for: missing verification, missing backup, hardcoded AWS IDs.
-
     - path: "src/quicksight_mcp/tools/*.py"
       instructions: |
-        MCP tool wrappers. Every tool MUST follow this pattern:
-        - start = time.time()
-        - try/except with get_tracker().record_call()
-        - Return structured dict with status or error
-        Check for: missing tracker calls, inconsistent return formats.
+        MCP tool files (v1.1 pattern). Every tool MUST use @qs_tool decorator.
+        The @qs_tool decorator handles ALL timing, memory recording, error formatting,
+        and structured logging automatically. Tools should NOT:
+        - Call time.time() manually
+        - Call get_tracker().record_call() — replaced by get_memory() via @qs_tool
+        - Wrap in try/except for error formatting — decorator handles this
+        - Return {"error": str(e)} — decorator returns structured error with isError
+
+        Check that:
+        - read_only/destructive/idempotent annotations match actual AWS API behavior
+        - idempotent = calling TWICE with SAME args produces SAME effect
+        - refresh_dataset is NOT idempotent (each call creates new ingestion)
+        - cancel_refresh IS destructive (terminates running process)
+        - JSON parse errors bubble to decorator (no manual try/except for json.loads)
+        - get_memory parameter is used in @qs_tool(mcp, get_memory, ...)
+
+    - path: "src/quicksight_mcp/services/*.py"
+      instructions: |
+        Service layer. Check for:
+        - QSError hierarchy (not bare exceptions)
+        - Verification after writes
+        - Backup before destructive operations
+        - No silent failures
+
+    - path: "src/quicksight_mcp/memory/*.py"
+      instructions: |
+        Memory/brain system. Check for:
+        - Bounded growth (max_entries limits)
+        - Atomic writes (tempfile + os.rename)
+        - Memory failures must NEVER break tool calls
+
+    - path: "src/quicksight_mcp/brain/*.py"
+      instructions: |
+        Self-improvement engine. Check for:
+        - Handle empty data gracefully
+        - No division by zero in latency calculations
+        - Insights sorted by priority
+
+    - path: "src/quicksight_mcp/server.py"
+      instructions: |
+        Server entry point. Check that:
+        - setup_logging() at module level (not in main())
+        - get_memory passed to ALL register_*_tools() calls
+        - Lazy-initialized singletons for ServiceContainer and MemoryManager
+
+    - path: "tests/*.py"
+      instructions: |
+        Tests. Check for:
+        - Meaningful assertions (not just "doesn't crash")
+        - Edge cases: empty data, None, boundaries
+        - Persistence: flush + reload pattern
+        - No timing-dependent assertions
 
     - path: "**/*.py"
       instructions: |
-        General Python review. Check for:
-        - No hardcoded AWS credentials, account IDs, or resource IDs
-        - No print() statements (use logger)
-        - Python 3.10+ compatible syntax
+        General. Check for:
+        - No hardcoded AWS credentials or account IDs
+        - No print() (use logger)
+        - Python 3.10+ syntax
+
+  tools:
+    ruff:
+      enabled: true
+    ast-grep:
+      enabled: true
 
 chat:
   auto_reply: true

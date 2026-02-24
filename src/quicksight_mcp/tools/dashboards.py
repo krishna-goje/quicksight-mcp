@@ -4,21 +4,22 @@ Provides tools for listing, searching, versioning, publishing, and
 rolling back QuickSight dashboards.
 """
 
-import time
 import logging
 from typing import Callable
 
 from fastmcp import FastMCP
 
+from quicksight_mcp.tools._decorator import qs_tool
+
 logger = logging.getLogger(__name__)
 
 
 def register_dashboard_tools(
-    mcp: FastMCP, get_client: Callable, get_tracker: Callable
+    mcp: FastMCP, get_client: Callable, get_tracker: Callable, get_memory=None
 ):
     """Register all dashboard-related MCP tools."""
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def list_dashboards() -> dict:
         """List all QuickSight dashboards with their names, IDs, and publish status.
 
@@ -31,36 +32,25 @@ def register_dashboard_tools(
         - id: Dashboard ID (use this for other dashboard operations)
         - published_version: Current published version number
         """
-        start = time.time()
         client = get_client()
-        try:
-            dashboards = client.list_dashboards()
-            result = {
-                "count": len(dashboards),
-                "dashboards": [
-                    {
-                        "name": d.get("Name"),
-                        "id": d.get("DashboardId"),
-                        "published_version": d.get("Version", {}).get(
-                            "VersionNumber"
-                        )
-                        if isinstance(d.get("Version"), dict)
-                        else None,
-                    }
-                    for d in dashboards
-                ],
-            }
-            get_tracker().record_call(
-                "list_dashboards", {}, (time.time() - start) * 1000, True
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "list_dashboards", {}, (time.time() - start) * 1000, False, str(e)
-            )
-            return {"error": str(e)}
+        dashboards = client.list_dashboards()
+        return {
+            "count": len(dashboards),
+            "dashboards": [
+                {
+                    "name": d.get("Name"),
+                    "id": d.get("DashboardId"),
+                    "published_version": d.get("Version", {}).get(
+                        "VersionNumber"
+                    )
+                    if isinstance(d.get("Version"), dict)
+                    else None,
+                }
+                for d in dashboards
+            ],
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def search_dashboards(name: str) -> dict:
         """Search QuickSight dashboards by name (case-insensitive partial match).
 
@@ -70,39 +60,21 @@ def register_dashboard_tools(
 
         Returns matching dashboards with their IDs.
         """
-        start = time.time()
         client = get_client()
-        try:
-            results = client.search_dashboards(name)
-            result = {
-                "query": name,
-                "count": len(results),
-                "dashboards": [
-                    {
-                        "name": d.get("Name"),
-                        "id": d.get("DashboardId"),
-                    }
-                    for d in results
-                ],
-            }
-            get_tracker().record_call(
-                "search_dashboards",
-                {"name": name},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return result
-        except Exception as e:
-            get_tracker().record_call(
-                "search_dashboards",
-                {"name": name},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        results = client.search_dashboards(name)
+        return {
+            "query": name,
+            "count": len(results),
+            "dashboards": [
+                {
+                    "name": d.get("Name"),
+                    "id": d.get("DashboardId"),
+                }
+                for d in results
+            ],
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, read_only=True)
     def get_dashboard_versions(dashboard_id: str, limit: int = 10) -> dict:
         """List the version history of a QuickSight dashboard.
 
@@ -114,34 +86,17 @@ def register_dashboard_tools(
         and source analysis ARN. Useful for auditing changes and finding
         a version number to rollback to.
         """
-        start = time.time()
         client = get_client()
-        try:
-            versions = client.get_dashboard_versions(dashboard_id, limit=limit)
-            current = client.get_current_dashboard_version(dashboard_id)
-            get_tracker().record_call(
-                "get_dashboard_versions",
-                {"dashboard_id": dashboard_id, "limit": limit},
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "dashboard_id": dashboard_id,
-                "current_version": current.get("VersionNumber"),
-                "version_count": len(versions),
-                "versions": versions,
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "get_dashboard_versions",
-                {"dashboard_id": dashboard_id, "limit": limit},
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        versions = client.get_dashboard_versions(dashboard_id, limit=limit)
+        current = client.get_current_dashboard_version(dashboard_id)
+        return {
+            "dashboard_id": dashboard_id,
+            "current_version": current.get("VersionNumber"),
+            "version_count": len(versions),
+            "versions": versions,
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def publish_dashboard(
         dashboard_id: str,
         source_analysis_id: str,
@@ -166,47 +121,24 @@ def register_dashboard_tools(
             version_description: Optional description for this version
                                  (e.g., "Added revenue breakdown chart").
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.publish_dashboard(
-                dashboard_id,
-                source_analysis_id,
-                version_description=version_description or None,
-            )
-            get_tracker().record_call(
-                "publish_dashboard",
-                {
-                    "dashboard_id": dashboard_id,
-                    "source_analysis_id": source_analysis_id,
-                },
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "published",
-                "dashboard_id": dashboard_id,
-                "source_analysis_id": source_analysis_id,
-                "version_description": version_description,
-                "note": (
-                    "Dashboard updated. All viewers will see the new version. "
-                    "Use rollback_dashboard if you need to revert."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "publish_dashboard",
-                {
-                    "dashboard_id": dashboard_id,
-                    "source_analysis_id": source_analysis_id,
-                },
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.publish_dashboard(
+            dashboard_id,
+            source_analysis_id,
+            version_description=version_description or None,
+        )
+        return {
+            "status": "published",
+            "dashboard_id": dashboard_id,
+            "source_analysis_id": source_analysis_id,
+            "version_description": version_description,
+            "note": (
+                "Dashboard updated. All viewers will see the new version. "
+                "Use rollback_dashboard if you need to revert."
+            ),
+        }
 
-    @mcp.tool
+    @qs_tool(mcp, get_memory, destructive=True)
     def rollback_dashboard(dashboard_id: str, version_number: int) -> dict:
         """Rollback a QuickSight dashboard to a previous version.
 
@@ -222,37 +154,14 @@ def register_dashboard_tools(
             version_number: The version number to rollback to.
                             Use get_dashboard_versions to find valid numbers.
         """
-        start = time.time()
         client = get_client()
-        try:
-            client.rollback_dashboard(dashboard_id, version_number)
-            get_tracker().record_call(
-                "rollback_dashboard",
-                {
-                    "dashboard_id": dashboard_id,
-                    "version_number": version_number,
-                },
-                (time.time() - start) * 1000,
-                True,
-            )
-            return {
-                "status": "rolled_back",
-                "dashboard_id": dashboard_id,
-                "restored_version": version_number,
-                "note": (
-                    "Dashboard rolled back successfully. "
-                    "All viewers now see the restored version."
-                ),
-            }
-        except Exception as e:
-            get_tracker().record_call(
-                "rollback_dashboard",
-                {
-                    "dashboard_id": dashboard_id,
-                    "version_number": version_number,
-                },
-                (time.time() - start) * 1000,
-                False,
-                str(e),
-            )
-            return {"error": str(e)}
+        client.rollback_dashboard(dashboard_id, version_number)
+        return {
+            "status": "rolled_back",
+            "dashboard_id": dashboard_id,
+            "restored_version": version_number,
+            "note": (
+                "Dashboard rolled back successfully. "
+                "All viewers now see the restored version."
+            ),
+        }
