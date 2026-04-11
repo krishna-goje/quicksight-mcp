@@ -538,48 +538,51 @@ class MemoryManager:
         if not self.enabled:
             return
 
-        # Original tracking
-        self.usage.record_call(tool_name, params, duration_ms, success, error)
+        try:
+            # Original tracking
+            self.usage.record_call(tool_name, params, duration_ms, success, error)
 
-        # Brain tracking
-        self.call_log.append(tool_name, params, duration_ms, success, error or "")
-        self.latency.record(tool_name, duration_ms)
+            # Brain tracking
+            self.call_log.append(tool_name, params, duration_ms, success, error or "")
+            self.latency.record(tool_name, duration_ms)
 
-        # Knowledge graph: track resource context
-        resource_id = params.get(
-            "dataset_id",
-            params.get("analysis_id", params.get("dashboard_id", "")),
-        )
-        if resource_id:
-            props: Dict[str, Any] = {
-                "last_tool": tool_name,
-                "last_access": time.time(),
-            }
-            if not success and error:
-                props["last_error"] = error[:200]
-                props["last_error_type"] = self._classify_error(error)
-            # Determine entity type from param name
-            if params.get("dataset_id"):
-                entity_type = "dataset"
-            elif params.get("analysis_id"):
-                entity_type = "analysis"
-            else:
-                entity_type = "dashboard"
-            self.knowledge.add_entity(entity_type, resource_id, props)
-
-        if not success and error:
-            error_type = self._classify_error(error)
+            # Knowledge graph: track resource context
+            resource_id = params.get(
+                "dataset_id",
+                params.get("analysis_id", params.get("dashboard_id", "")),
+            )
             if resource_id:
-                self.errors.record_error(resource_id, error_type, error)
-                # Track error→resource relationship
-                self.knowledge.add_relationship(
-                    "error_on", error_type, resource_id,
-                )
+                props: Dict[str, Any] = {
+                    "last_tool": tool_name,
+                    "last_access": time.time(),
+                }
+                if not success and error:
+                    props["last_error"] = error[:200]
+                    props["last_error_type"] = self._classify_error(error)
+                # Determine entity type from param name
+                if params.get("dataset_id"):
+                    entity_type = "dataset"
+                elif params.get("analysis_id"):
+                    entity_type = "analysis"
+                else:
+                    entity_type = "dashboard"
+                self.knowledge.add_entity(entity_type, resource_id, props)
 
-        # Periodic flush
-        self._call_count += 1
-        if self._call_count % self._flush_interval == 0:
-            self.flush()
+            if not success and error:
+                error_type = self._classify_error(error)
+                if resource_id:
+                    self.errors.record_error(resource_id, error_type, error)
+                    # Track error→resource relationship
+                    self.knowledge.add_relationship(
+                        "error_on", error_type, resource_id,
+                    )
+
+            # Periodic flush
+            self._call_count += 1
+            if self._call_count % self._flush_interval == 0:
+                self.flush()
+        except Exception as exc:
+            logger.warning("Memory recording failed for %s: %s", tool_name, exc)
 
     def get_recovery_suggestions(
         self, resource_id: str, error_type: str,

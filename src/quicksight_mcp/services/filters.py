@@ -9,7 +9,11 @@ import logging
 from typing import TYPE_CHECKING, Dict, Optional
 
 from quicksight_mcp.core.cache import TTLCache
-from quicksight_mcp.safety.exceptions import ChangeVerificationError
+from quicksight_mcp.safety.exceptions import (
+    ChangeVerificationError,
+    QSNotFoundError,
+    QSValidationError,
+)
 
 if TYPE_CHECKING:
     from quicksight_mcp.core.aws_client import AwsClient
@@ -74,7 +78,7 @@ class FilterService:
         if new_id and any(
             fg.get("FilterGroupId") == new_id for fg in filter_groups
         ):
-            raise ValueError(f"Filter group '{new_id}' already exists")
+            raise QSValidationError(f"Filter group '{new_id}' already exists")
 
         filter_groups.append(filter_group_definition)
 
@@ -120,9 +124,7 @@ class FilterService:
             if fg.get("FilterGroupId") != filter_group_id
         ]
         if len(definition["FilterGroups"]) == original_count:
-            raise ValueError(
-                f"Filter group '{filter_group_id}' not found"
-            )
+            raise QSNotFoundError("FilterGroup", filter_group_id)
 
         result = self._analyses.update_analysis(
             analysis_id,

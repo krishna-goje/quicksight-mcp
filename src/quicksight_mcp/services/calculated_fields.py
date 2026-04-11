@@ -10,7 +10,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from quicksight_mcp.safety.exceptions import ChangeVerificationError
+from quicksight_mcp.safety.exceptions import (
+    ChangeVerificationError,
+    QSNotFoundError,
+    QSValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +94,7 @@ class CalculatedFieldService:
 
         calc_fields = definition.setdefault("CalculatedFields", [])
         if any(f.get("Name") == name for f in calc_fields):
-            raise ValueError(
+            raise QSValidationError(
                 f"Calculated field '{name}' already exists. "
                 f"Use update instead."
             )
@@ -151,7 +155,7 @@ class CalculatedFieldService:
                 break
 
         if not found:
-            raise ValueError(f"Calculated field '{name}' not found")
+            raise QSNotFoundError("CalculatedField", name)
 
         result = self._analyses.update_analysis(
             analysis_id,
@@ -166,7 +170,7 @@ class CalculatedFieldService:
 
         if self._analyses._should_verify(verify):
             self._verify_calculated_field_exists(
-                analysis_id, name, new_expression
+                analysis_id, name, new_expression, operation="update_calculated_field"
             )
 
         return result
@@ -206,7 +210,7 @@ class CalculatedFieldService:
         ]
 
         if len(definition.get("CalculatedFields", [])) == original_count:
-            raise ValueError(f"Calculated field '{name}' not found")
+            raise QSNotFoundError("CalculatedField", name)
 
         result = self._analyses.update_analysis(
             analysis_id,
@@ -233,6 +237,7 @@ class CalculatedFieldService:
         analysis_id: str,
         name: str,
         expected_expression: Optional[str] = None,
+        operation: str = "add_calculated_field",
     ) -> bool:
         """Verify a calculated field exists (and optionally matches expression).
 
@@ -247,13 +252,13 @@ class CalculatedFieldService:
                     and f.get("Expression") != expected_expression
                 ):
                     raise ChangeVerificationError(
-                        "add_calculated_field",
+                        operation,
                         analysis_id,
                         f"Field '{name}' exists but expression does not match.",
                     )
                 return True
         raise ChangeVerificationError(
-            "add_calculated_field",
+            operation,
             analysis_id,
             f"Field '{name}' not found after update.",
         )

@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from quicksight_mcp.core.cache import TTLCache
 from quicksight_mcp.core.types import VISUAL_TYPES, extract_visual_id, parse_visual
-from quicksight_mcp.safety.exceptions import ChangeVerificationError
+from quicksight_mcp.safety.exceptions import (
+    ChangeVerificationError,
+    QSNotFoundError,
+)
 
 if TYPE_CHECKING:
     from quicksight_mcp.core.aws_client import AwsClient
@@ -101,7 +104,7 @@ class VisualService:
                 break
 
         if target_sheet is None:
-            raise ValueError(f"Sheet '{sheet_id}' not found")
+            raise QSNotFoundError("Sheet", sheet_id)
 
         # Extract visual ID for layout
         visual_id = extract_visual_id(visual_definition)
@@ -207,7 +210,7 @@ class VisualService:
                 break
 
         if not found:
-            raise ValueError(f"Visual '{visual_id}' not found")
+            raise QSNotFoundError("Visual", visual_id)
 
         result = self._analyses.update_analysis(
             analysis_id,
@@ -263,7 +266,7 @@ class VisualService:
                 break
 
         if not found:
-            raise ValueError(f"Visual '{visual_id}' not found")
+            raise QSNotFoundError("Visual", visual_id)
 
         result = self._analyses.update_analysis(
             analysis_id,
@@ -348,9 +351,7 @@ class VisualService:
                 break
 
         if not found:
-            raise ValueError(
-                f"Layout element for visual '{visual_id}' not found"
-            )
+            raise QSNotFoundError("LayoutElement", visual_id)
 
         return self._analyses.update_analysis(
             analysis_id,

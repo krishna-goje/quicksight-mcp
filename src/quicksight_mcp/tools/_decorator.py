@@ -91,7 +91,7 @@ def qs_tool(
                                 tool_name, kwargs, duration_ms, True
                             )
                     except Exception:
-                        pass  # Never let memory recording break the tool
+                        logger.debug("Memory recording failed", exc_info=True)
 
                 # Log completion
                 log_tool_complete(
@@ -115,7 +115,7 @@ def qs_tool(
                                 tool_name, kwargs, duration_ms, False, str(e)
                             )
                     except Exception:
-                        pass
+                        logger.debug("Memory recording failed", exc_info=True)
 
                 # Log failure
                 log_tool_complete(
@@ -144,7 +144,7 @@ def qs_tool(
                             if past:
                                 error_response["past_recovery"] = past
                     except Exception:
-                        pass
+                        logger.debug("Memory recording failed", exc_info=True)
 
                 return error_response
 
@@ -160,7 +160,7 @@ def qs_tool(
                                 tool_name, kwargs, duration_ms, False, str(e)
                             )
                     except Exception:
-                        pass
+                        logger.debug("Memory recording failed", exc_info=True)
 
                 # Log failure
                 log_tool_complete(
@@ -240,4 +240,15 @@ def _truncate_response(result: Any, tool_name: str) -> Any:
         f"Response exceeded {CHARACTER_LIMIT} characters and was truncated. "
         f"Use more specific queries or limit/offset parameters."
     )
+
+    # Final safety check: if still too large, replace with a summary string
+    if len(json.dumps(truncated, default=str)) > CHARACTER_LIMIT:
+        return {
+            "_truncated": True,
+            "_note": (
+                f"Response from '{tool_name}' exceeded {CHARACTER_LIMIT} characters "
+                f"even after truncation. Use more specific queries or filters."
+            ),
+        }
+
     return truncated

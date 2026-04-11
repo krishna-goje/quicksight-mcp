@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from quicksight_mcp.core.cache import TTLCache
 from quicksight_mcp.core.types import VISUAL_TYPES
-from quicksight_mcp.safety.exceptions import ChangeVerificationError
+from quicksight_mcp.safety.exceptions import (
+    ChangeVerificationError,
+    QSNotFoundError,
+    QSValidationError,
+)
 
 if TYPE_CHECKING:
     from quicksight_mcp.core.aws_client import AwsClient
@@ -76,7 +80,7 @@ class SheetService:
 
         sheets = definition.setdefault("Sheets", [])
         if any(s.get("SheetId") == new_sheet_id for s in sheets):
-            raise ValueError(f"Sheet '{new_sheet_id}' already exists")
+            raise QSValidationError(f"Sheet '{new_sheet_id}' already exists")
 
         new_sheet: Dict[str, Any] = {
             "SheetId": new_sheet_id,
@@ -138,7 +142,7 @@ class SheetService:
             s for s in sheets if s.get("SheetId") != sheet_id
         ]
         if len(definition["Sheets"]) == original_count:
-            raise ValueError(f"Sheet '{sheet_id}' not found")
+            raise QSNotFoundError("Sheet", sheet_id)
 
         fg_removed = self._remove_sheet_filter_scopes(definition, {sheet_id})
 
@@ -190,7 +194,7 @@ class SheetService:
                 break
 
         if not found:
-            raise ValueError(f"Sheet '{sheet_id}' not found")
+            raise QSNotFoundError("Sheet", sheet_id)
 
         result = self._analyses.update_analysis(
             analysis_id,
@@ -246,7 +250,7 @@ class SheetService:
         # Check sheet limit (QuickSight max is 20 sheets per analysis)
         current_sheets = definition.get("Sheets", [])
         if len(current_sheets) >= 20:
-            raise ValueError(
+            raise QSValidationError(
                 f"Cannot add sheet: analysis already has {len(current_sheets)} "
                 f"sheets (QuickSight max is 20). Delete a sheet first."
             )
@@ -258,7 +262,7 @@ class SheetService:
                 source_sheet = s
                 break
         if not source_sheet:
-            raise ValueError(f"Source sheet '{source_sheet_id}' not found")
+            raise QSNotFoundError("Sheet", source_sheet_id)
 
         # Build layout map from source
         src_layouts = (

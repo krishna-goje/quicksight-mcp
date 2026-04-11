@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Dict, Optional
 
 from quicksight_mcp.core.cache import TTLCache
 from quicksight_mcp.core.types import PARAMETER_TYPES
-from quicksight_mcp.safety.exceptions import ChangeVerificationError
+from quicksight_mcp.safety.exceptions import (
+    ChangeVerificationError,
+    QSNotFoundError,
+    QSValidationError,
+)
 
 if TYPE_CHECKING:
     from quicksight_mcp.core.aws_client import AwsClient
@@ -78,7 +82,7 @@ class ParameterService:
             for p in params:
                 existing_name = self._extract_parameter_name(p)
                 if existing_name == new_name:
-                    raise ValueError(
+                    raise QSValidationError(
                         f"Parameter '{new_name}' already exists"
                     )
 
@@ -130,7 +134,7 @@ class ParameterService:
             p for p in params if not _matches(p)
         ]
         if len(definition["ParameterDeclarations"]) == original_count:
-            raise ValueError(f"Parameter '{parameter_name}' not found")
+            raise QSNotFoundError("Parameter", parameter_name)
 
         result = self._analyses.update_analysis(
             analysis_id,

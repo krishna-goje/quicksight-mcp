@@ -21,8 +21,11 @@ from quicksight_mcp.core.aws_client import AwsClient
 from quicksight_mcp.core.cache import TTLCache
 from quicksight_mcp.core.types import VISUAL_TYPES, parse_visual
 from quicksight_mcp.safety.exceptions import (
+    ChangeVerificationError,
     ConcurrentModificationError,
     DestructiveChangeError,
+    QSNotFoundError,
+    QSValidationError,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,7 +215,7 @@ class AnalysisService:
         """Get all visuals in a specific sheet."""
         sheet = self.get_sheet(analysis_id, sheet_id)
         if not sheet:
-            raise ValueError(f"Sheet '{sheet_id}' not found")
+            raise QSNotFoundError("Sheet", sheet_id)
         visuals: List[Dict] = []
         for v in sheet.get("Visuals", []):
             info = parse_visual(v)
@@ -277,7 +280,7 @@ class AnalysisService:
         # Refuse to update a FAILED analysis
         status = analysis.get("Status", "")
         if "FAILED" in status:
-            raise RuntimeError(
+            raise QSValidationError(
                 f"Cannot update analysis: current status is {status}. "
                 f"Restore from backup first using restore_analysis."
             )
@@ -336,12 +339,16 @@ class AnalysisService:
                 msgs = [
                     f"{e.get('Type')}: {e.get('Message')}" for e in errors
                 ]
-                raise RuntimeError(
-                    f"Analysis update failed: {'; '.join(msgs)}"
+                raise ChangeVerificationError(
+                    "update_analysis",
+                    analysis_id,
+                    f"Analysis update failed: {'; '.join(msgs)}",
                 )
 
-        raise RuntimeError(
-            f"Analysis update timed out after {timeout}s"
+        raise ChangeVerificationError(
+            "update_analysis",
+            analysis_id,
+            f"Analysis update timed out after {timeout}s",
         )
 
     # ------------------------------------------------------------------

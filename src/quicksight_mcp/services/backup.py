@@ -18,6 +18,11 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from quicksight_mcp.config import Settings
 from quicksight_mcp.core.cache import TTLCache
+from quicksight_mcp.safety.exceptions import (
+    ChangeVerificationError,
+    QSNotFoundError,
+    QSValidationError,
+)
 
 if TYPE_CHECKING:
     from quicksight_mcp.core.aws_client import AwsClient
@@ -109,7 +114,7 @@ class BackupService:
         for allowed in self._allowed_restore_dirs():
             if real.startswith(allowed + os.sep) or real == allowed:
                 return real
-        raise ValueError(
+        raise QSValidationError(
             f"Backup file must be within the backup directory. Got: {path}"
         )
 
@@ -204,7 +209,7 @@ class BackupService:
 
         target_id = analysis_id or backup_data.get("analysis", {}).get("AnalysisId")
         if not target_id:
-            raise ValueError("No analysis ID provided and none found in backup")
+            raise QSValidationError("No analysis ID provided and none found in backup")
 
         return self.restore_from_backup(real_path, target_id)
 
@@ -234,7 +239,7 @@ class BackupService:
 
         target_id = dataset_id or backup_data.get("DataSetId")
         if not target_id:
-            raise ValueError("No dataset ID provided and none found in backup")
+            raise QSValidationError("No dataset ID provided and none found in backup")
 
         # Pre-restore safety backup
         self.backup_dataset(target_id)
@@ -268,7 +273,7 @@ class BackupService:
                     self._aws.call("update_data_set", **update_params)
                     return {"status": "restored", "dataset_id": target_id}
 
-        raise ValueError("No CustomSql found in backup file")
+        raise QSNotFoundError("CustomSql", backup_file)
 
     def restore_from_backup(
         self,
@@ -300,7 +305,7 @@ class BackupService:
         # Handle both Definition (capital) and definition (lower) key casing
         definition = backup_data.get("Definition", backup_data.get("definition", {}))
         if not definition:
-            raise ValueError(f"No Definition found in backup file: {backup_file}")
+            raise QSNotFoundError("Definition", backup_file)
 
         # Pre-restore backup (best-effort; may fail for FAILED analyses)
         try:
@@ -337,11 +342,17 @@ class BackupService:
                 return {"status": status, "analysis_id": analysis_id}
             if "FAILED" in status:
                 errors = refreshed.get("Errors", [])
-                raise RuntimeError(
-                    f"Restore failed: {[e.get('Message', '') for e in errors]}"
+                raise ChangeVerificationError(
+                    "restore_analysis",
+                    analysis_id,
+                    f"Restore failed: {[e.get('Message', '') for e in errors]}",
                 )
 
-        raise RuntimeError(f"Restore timed out after {timeout}s")
+        raise ChangeVerificationError(
+            "restore_analysis",
+            analysis_id,
+            f"Restore timed out after {timeout}s",
+        )
 
     # ------------------------------------------------------------------
     # Clone
