@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # =========================================================================
@@ -326,6 +326,20 @@ class BackupInput(StrictModel):
         default="", min_length=0, max_length=256,
         description="Dataset ID (for backup_dataset)",
     )
+
+    @model_validator(mode="after")
+    def exactly_one_id(self) -> "BackupInput":
+        has_analysis = bool(self.analysis_id)
+        has_dataset = bool(self.dataset_id)
+        if has_analysis and has_dataset:
+            raise ValueError(
+                "Provide exactly one of analysis_id or dataset_id, not both."
+            )
+        if not has_analysis and not has_dataset:
+            raise ValueError(
+                "Provide exactly one of analysis_id or dataset_id."
+            )
+        return self
 
 
 class RestoreInput(StrictModel):

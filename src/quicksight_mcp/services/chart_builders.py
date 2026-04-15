@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from quicksight_mcp.core.cache import TTLCache
 from quicksight_mcp.core.types import AGG_MAP, is_date_column
+from quicksight_mcp.safety.exceptions import QSNotFoundError
 
 if TYPE_CHECKING:
     from quicksight_mcp.core.aws_client import AwsClient
@@ -262,7 +263,7 @@ class ChartBuilderService:
                     "RowSpan": row_span,
                 })
                 return
-        raise ValueError(f"Sheet '{sheet_id}' not found")
+        raise QSNotFoundError("Sheet", sheet_id)
 
     # ------------------------------------------------------------------
     # Internal: extract field ID from a measure dict

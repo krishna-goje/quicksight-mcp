@@ -180,7 +180,7 @@ class DatasetService:
                 break
 
         if not found_custom_sql:
-            raise ValueError(
+            raise QSValidationError(
                 f"Dataset {dataset_id} does not use Custom SQL. "
                 f"Cannot update SQL query."
             )
@@ -398,7 +398,7 @@ class DatasetService:
             dict with ``ingestion_id``, ``status``, ``arn``.
         """
         self._aws.ensure_account_id()
-        ingestion_id = f"refresh-{datetime.now():%Y%m%d-%H%M%S}"
+        ingestion_id = f"refresh-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
         response = self._aws.call(
             "create_ingestion",
             AwsAccountId=self._aws.account_id,

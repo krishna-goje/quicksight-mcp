@@ -80,8 +80,11 @@ class MemoryStore:
         """Persist to disk (atomic write)."""
         if not self._dirty:
             return
-        self._save()
-        self._dirty = False
+        try:
+            self._save()
+            self._dirty = False
+        except Exception:
+            pass  # Keep dirty=True so next flush retries
 
     def clear(self) -> None:
         """Remove all entries."""
